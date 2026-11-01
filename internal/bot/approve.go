@@ -35,11 +35,12 @@ func findTool(tools []toolbox.Tool, name string) (toolbox.Tool, bool) {
 
 // approve asks sender to allow a tool call and waits for the answer. It returns "" if
 // approved, or what to tell the model instead of running the tool. The error is set
-// only when ctx ends (e.g. /stop).
+// only when ctx ends (e.g. /stop). lastFailure, if set, is the error from the tool call
+// just before, shown so a retry doesn't come out of nowhere.
 //
 // While it waits, the sender's next message (other than a command) is the answer:
 // see answer, called from Handle.
-func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, name string, args map[string]any) (string, error) {
+func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, name string, args map[string]any, lastFailure string) (string, error) {
 	ch := make(chan string, 1)
 	b.mu.Lock()
 	b.approvals[sender] = ch
@@ -58,7 +59,7 @@ func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, 
 		b.mu.Unlock()
 	}()
 
-	if err := b.msg.Send(ctx, sender, approvalPrompt(tools, name, args, b.opt.ApprovalTimeout), false, nil); err != nil {
+	if err := b.msg.Send(ctx, sender, approvalPrompt(tools, name, args, lastFailure, b.opt.ApprovalTimeout), false, nil); err != nil {
 		slog.Error("send approval request", "err", err)
 		return "Couldn't ask the user for approval, so this action was NOT run.", nil
 	}
@@ -115,8 +116,11 @@ func (b *Bot) awaiting(sender string) bool {
 // approvalPrompt shows the call as it will be made. Call leaves out blank arguments
 // and ones the tool doesn't declare; blank ones are just noise, but a real value being
 // left out can widen an action, so those are listed.
-func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, timeout time.Duration) string {
+func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, lastFailure string, timeout time.Duration) string {
 	var sb strings.Builder
+	if lastFailure != "" {
+		sb.WriteString("The last try failed: " + snippet(lastFailure, 200) + "\n\n")
+	}
 	fmt.Fprintf(&sb, "Allow %s?", displayName(name))
 	clean, ignored := args, []string(nil)
 	if t, ok := findTool(tools, name); ok {

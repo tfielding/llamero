@@ -55,6 +55,7 @@ type fakeLLM struct {
 	failOn   string           // if set, Chat fails when any message contains it
 	caps     []string         // capabilities reported for models without other metadata
 	toolCall *ollama.ToolCall // if set, the model calls this tool when tools are offered
+	retry    bool             // and calls it again after it fails
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -78,7 +79,8 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 	if chatErr != nil {
 		return ollama.Result{}, chatErr
 	}
-	if f.toolCall != nil && len(tools) > 0 && msgs[len(msgs)-1].Role == "user" {
+	last := msgs[len(msgs)-1]
+	if f.toolCall != nil && len(tools) > 0 && (last.Role == "user" || (f.retry && strings.HasPrefix(last.Content, "Tool returned an error"))) {
 		return ollama.Result{ToolCalls: []ollama.ToolCall{*f.toolCall}}, nil
 	}
 	return ollama.Result{

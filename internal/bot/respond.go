@@ -156,6 +156,7 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 	var images []toolbox.Image
 	var stats ollama.Stats
 	failures := 0
+	lastFailure := "" // error from the previous tool call, shown if the next one needs approval
 	for round := 0; ; round++ {
 		if round == maxToolRounds || failures >= maxToolFailures {
 			if len(defs) > 0 {
@@ -181,10 +182,11 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 		for _, tc := range res.ToolCalls {
 			name := tc.Function.Name
 			if b.needsApproval(tools, name) {
-				decline, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments)
+				decline, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments, lastFailure)
 				if err != nil {
 					return "", nil, stats, err
 				}
+				lastFailure = ""
 				if decline != "" {
 					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: decline})
 					continue
@@ -215,8 +217,13 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 				attrs = append(attrs, "error_text", snippet(out.Text, 200))
 			}
 			slog.Info("tool call", attrs...)
+			lastFailure = ""
 			if err != nil || out.IsError {
 				failures++
+				lastFailure = out.Text
+				if err != nil {
+					lastFailure = err.Error()
+				}
 			}
 
 			msg := ollama.Message{Role: "tool", ToolName: name, Content: out.Text}

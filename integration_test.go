@@ -96,7 +96,7 @@ func TestEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	llm := ollama.New(ollamaSrv.URL, 5*time.Second)
-	model, err := firstModel(ctx, llm)
+	model, err := firstModel(ctx, llm, nil, time.Second)
 	if err != nil || model != "llama3.2:latest" {
 		t.Fatalf("firstModel = %q, %v", model, err)
 	}

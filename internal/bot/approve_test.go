@@ -16,6 +16,7 @@ type fakeTools struct {
 	mu    sync.Mutex
 	tools []toolbox.Tool
 	calls []map[string]any
+	fail  string // if set, every call returns this error
 }
 
 func (f *fakeTools) Tools(context.Context) []toolbox.Tool { return f.tools }
@@ -23,6 +24,9 @@ func (f *fakeTools) Call(_ context.Context, name string, args map[string]any) (t
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
+	if f.fail != "" {
+		return toolbox.Output{Text: f.fail, IsError: true}, nil
+	}
 	return toolbox.Output{Text: "turned off"}, nil
 }
 func (f *fakeTools) Errors() map[string]error       { return nil }
@@ -176,14 +180,14 @@ func TestApprovalPrompt(t *testing.T) {
 	// Empty filters and a blank undeclared "floor", as small models often send.
 	args := map[string]any{"room": "Office", "name": "Light", "kind": []any{}, "tags": []any{}, "floor": ""}
 	want := "Allow switch_on?\n• name: Light\n• room: Office\nReply yes to run it, anything else cancels (2 min)."
-	if got := approvalPrompt(tools, "devices__switch_on", args, 2*time.Minute); got != want {
+	if got := approvalPrompt(tools, "devices__switch_on", args, "", 2*time.Minute); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 
 	args = map[string]any{"name": "Light", "kind": []any{"lamp", "plug"}, "floor": "Upstairs"}
 	want = "Allow switch_on?\n• kind: lamp, plug\n• name: Light\n• left out, the tool doesn't take it: floor: Upstairs\n" +
 		"Reply yes to run it, anything else cancels (1m30s)."
-	if got := approvalPrompt(tools, "devices__switch_on", args, 90*time.Second); got != want {
+	if got := approvalPrompt(tools, "devices__switch_on", args, "", 90*time.Second); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -200,5 +204,29 @@ func TestApprovalSwipeReply(t *testing.T) {
 	}
 	if ft.called() != 1 {
 		t.Fatalf("calls: %d", ft.called())
+	}
+}
+
+func TestApprovalShowsLastFailure(t *testing.T) {
+	tools := []toolbox.Tool{{Name: "switch_on", Schema: lightSchema}}
+	got := approvalPrompt(tools, "switch_on", map[string]any{"name": "Office"}, "Error calling tool:   No entities\n matched 'Office'", time.Minute)
+	want := "The last try failed: Error calling tool: No entities matched 'Office'\n\n" +
+		"Allow switch_on?\n• name: Office\nReply yes to run it, anything else cancels (1 min)."
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestApprovalRetryShowsError(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	ft.fail, l.retry = "No entities matched 'kitchen'", true
+	b.Handle(dm(me, "turn off the kitchen light"))
+	if r := reply(t, m); strings.Contains(r, "last try failed") {
+		t.Fatalf("first prompt shows a failure: %q", r)
+	}
+	b.Handle(dm(me, "yes"))
+	// The fake model calls the tool again after the failure.
+	if r := reply(t, m); !strings.HasPrefix(r, "The last try failed: No entities matched 'kitchen'\n\nAllow turn_off?") {
+		t.Fatalf("retry prompt: %q", r)
 	}
 }

@@ -12,8 +12,10 @@ All notable changes to this project are documented here. The format follows
   `HISTORY_SUMMARY` (default `true`) and `SUMMARY_MODEL` settings.
 - Wake-on-LAN: with `OLLAMA_WOL_MAC` set, a message that arrives while the Ollama machine is asleep
   wakes it and is answered once it's up (`OLLAMA_WOL_ADDR`, `OLLAMA_WOL_WAIT`). New `/wake` command.
+  It also wakes the machine at startup when the bot is waiting for Ollama to pick a model.
 - `MCP_ALLOW_WRITE=ask`: tools that can change things are offered, but each call waits for your
-  approval in Signal (yes to run, anything else cancels, 2-minute timeout).
+  approval in Signal (yes to run, anything else cancels, 2-minute timeout). If an approved call
+  fails and the model retries, the next prompt shows the error.
 - Replies to earlier messages (Signal's swipe-to-reply) pass the quoted text to the model, so
   "explain this part" refers to the right message.
 - `/settings` shows the current configuration. MCP tokens are never shown, phone numbers are

@@ -125,6 +125,8 @@ Reply yes to run it, anything else cancels (2 min).
 - Reply **yes** (or ok, sure, 👍) to run it. Any other reply cancels it, and the model sees what you
   wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too.
 - Commands still work meanwhile: `/status` shows what's waiting, `/stop` cancels the whole reply.
+- If an approved call fails and the model tries again, the next prompt starts with
+  "The last try failed: …" so you can see why.
 - Read-only tools never ask. Combine with `MCP_TOOLS` to offer only the actions you want.
 
 ## Wake-on-LAN
@@ -140,6 +142,8 @@ asleep, waking it up…", waits up to `OLLAMA_WOL_WAIT` for Ollama to answer, th
 - Docker: a container on a bridge network can't send to `255.255.255.255`. Set `OLLAMA_WOL_ADDR` to
   your LAN's broadcast address (e.g. `192.168.1.255:9`), or run the container with `network_mode: host`.
 - If Ollama doesn't answer in time, you get the usual "can't reach Ollama" reply.
+- If `OLLAMA_MODEL` isn't set, the bot needs Ollama at startup to pick a model; it sends a wake-up
+  then too (and every 5 minutes while it waits).
 
 ## Tools (MCP)
 

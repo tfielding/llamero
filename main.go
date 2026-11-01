@@ -49,8 +49,12 @@ func run() error {
 	defer stop()
 
 	llm := ollama.New(cfg.OllamaURL, cfg.OllamaTimeout)
+	var wake func(context.Context) error
+	if cfg.WakeMAC != nil {
+		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
+	}
 	if cfg.DefaultModel == "" {
-		cfg.DefaultModel, err = firstModel(ctx, llm)
+		cfg.DefaultModel, err = firstModel(ctx, llm, wake, 10*time.Second)
 		if err != nil {
 			return err
 		}
@@ -71,10 +75,6 @@ func run() error {
 		}
 		slog.Info("mcp tools", "servers", len(cfg.MCPServers), "tools", names)
 		tools = box
-	}
-	var wake func(context.Context) error
-	if cfg.WakeMAC != nil {
-		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
 	b := bot.New(sc, llm, st, bot.Options{
 		Tools:         tools,
@@ -101,8 +101,15 @@ func run() error {
 	return err
 }
 
+// wakeEvery is how often firstModel repeats the wake-up while Ollama stays unreachable.
+const wakeEvery = 5 * time.Minute
+
 // firstModel waits for Ollama to be reachable and returns its first installed model.
-func firstModel(ctx context.Context, llm *ollama.Client) (string, error) {
+// If wake is set (Wake-on-LAN), it wakes the Ollama machine while waiting.
+func firstModel(ctx context.Context, llm interface {
+	Models(context.Context) ([]string, error)
+}, wake func(context.Context) error, retry time.Duration) (string, error) {
+	var woke time.Time
 	for {
 		models, err := llm.Models(ctx)
 		if err == nil && len(models) > 0 {
@@ -111,12 +118,19 @@ func firstModel(ctx context.Context, llm *ollama.Client) (string, error) {
 		}
 		if err == nil {
 			err = errors.New("no models installed (run: ollama pull <model>)")
+		} else if wake != nil && time.Since(woke) >= wakeEvery {
+			if werr := wake(ctx); werr != nil {
+				slog.Error("wake-on-lan failed", "err", werr)
+			} else {
+				slog.Info("wake-on-lan sent while waiting for ollama")
+			}
+			woke = time.Now()
 		}
 		slog.Warn("waiting for ollama", "err", err)
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(10 * time.Second):
+		case <-time.After(retry):
 		}
 	}
 }
