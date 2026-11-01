@@ -12,6 +12,8 @@ services:
       - OLLAMA_URL=http://192.168.1.XX:11434
       # - OLLAMA_MODEL=llama3.2:latest  # default: first installed model
       # - HISTORY_LIMIT=40
+      # - HISTORY_SUMMARY=true          # summarize older messages instead of dropping them
+      # - SUMMARY_MODEL=llama3.2:latest # default: the chat's model
       # - SYSTEM_PROMPT=...
       # - MCP_SERVERS=cams=http://<go2rtc-mcp-host>:8090/mcp   # tools from MCP servers
       # - MCP_TOKEN_CAMS=...                                   # if that server has AUTH_TOKEN set

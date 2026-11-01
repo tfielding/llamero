@@ -27,6 +27,7 @@ type response struct {
 	text      string
 	fromModel bool // Markdown from the model (converted to Signal formatting)
 	images    []toolbox.Image
+	summarize bool // history is past the limit: summarize after sending
 }
 
 // respond produces the reply for one message.
@@ -47,6 +48,10 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	msgs := make([]ollama.Message, 0, len(chat.History)+2)
 	if b.opt.SystemPrompt != "" {
 		msgs = append(msgs, ollama.Message{Role: "system", Content: b.opt.SystemPrompt})
+	}
+	if chat.Summary != "" {
+		msgs = append(msgs, ollama.Message{Role: "system", Content: "Summary of the earlier conversation " +
+			"(those messages are no longer shown):\n" + chat.Summary})
 	}
 	msgs = append(msgs, chat.History...)
 	msgs = append(msgs, ollama.Message{Role: "user", Content: text})
@@ -113,13 +118,20 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if len(images) > 0 {
 		saved += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", len(images))
 	}
+	// With summaries on, messages past the limit wait to be summarized after the reply is sent.
+	// If summaries keep failing, the oldest are dropped at twice the limit.
+	limit := b.opt.HistoryLimit
+	if b.opt.Summarize {
+		limit *= 2
+	}
 	chat.History = trim(append(chat.History,
 		ollama.Message{Role: "user", Content: text},
-		ollama.Message{Role: "assistant", Content: strings.TrimSpace(saved)}), b.opt.HistoryLimit)
+		ollama.Message{Role: "assistant", Content: strings.TrimSpace(saved)}), limit)
 	if err := b.store.Save(sender, chat); err != nil {
 		slog.Error("save history", "err", err)
 	}
-	return response{text: answer, fromModel: true, images: images}
+	return response{text: answer, fromModel: true, images: images,
+		summarize: b.opt.Summarize && len(chat.History) > b.opt.HistoryLimit}
 }
 
 // run asks the model, executing any tool calls it makes, until it gives a final answer.

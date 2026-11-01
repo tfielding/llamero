@@ -13,9 +13,15 @@ func TestLoad(t *testing.T) {
 	if len(c.Allowed) != 2 || !c.Allowed["+15550000002"] {
 		t.Fatalf("allowed: %v", c.Allowed)
 	}
-	if c.OllamaURL != "http://10.0.0.5:11434" || c.HistoryLimit != 40 {
+	if c.OllamaURL != "http://10.0.0.5:11434" || c.HistoryLimit != 40 || !c.Summarize {
 		t.Fatalf("%+v", c)
 	}
+
+	t.Setenv("HISTORY_SUMMARY", "nope")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error for bad HISTORY_SUMMARY")
+	}
+	t.Setenv("HISTORY_SUMMARY", "")
 
 	t.Setenv("ALLOWED_SENDERS", "")
 	if _, err := Load(); err == nil {

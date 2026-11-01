@@ -27,10 +27,11 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 
 ## Features
 
-- Per-chat conversation memory, saved to disk (`DATA_DIR`), last `HISTORY_LIMIT` messages
+- Per-chat conversation memory, saved to disk (`DATA_DIR`): the last `HISTORY_LIMIT` messages, plus a
+  running summary of older ones (see [Long chats](#long-chats))
 - Typing indicator while the model is thinking
 - Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
-- Commands: `/model`, `/model <name>`, `/reset`, `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/help`
+- Commands: `/model`, `/model <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/help`
 - Messages from one person are answered in order; different people don't block each other
 - Reconnects to Signal automatically
 - Optional tools from MCP servers (e.g. camera snapshots); images that tools return are sent to you as attachments
@@ -53,6 +54,8 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 | `OLLAMA_URL` | `http://localhost:11434` | |
 | `OLLAMA_MODEL` | first installed model | Default model; each chat can switch with `/model` |
 | `HISTORY_LIMIT` | `40` | Messages kept per chat |
+| `HISTORY_SUMMARY` | `true` | Summarize messages past `HISTORY_LIMIT` instead of dropping them |
+| `SUMMARY_MODEL` | the chat's model | Model that writes summaries, e.g. a small fast one |
 | `SYSTEM_PROMPT` | short, phone-friendly assistant prompt | Overrides the built-in prompt (including its formatting rules) |
 | `OLLAMA_TIMEOUT` | `5m` | |
 | `DATA_DIR` | `/data` | Chat history (one JSON file per chat) |
@@ -86,6 +89,20 @@ Locally:
 SIGNAL_URL=http://<signal-host>:8080 SIGNAL_NUMBER=+1... ALLOWED_SENDERS=+1... \
 OLLAMA_URL=http://localhost:11434 DATA_DIR=./data go run .
 ```
+
+## Long chats
+
+Each chat keeps its last `HISTORY_LIMIT` messages word for word. When a chat goes past that, the
+older messages are summarized by the model and dropped; the newest half of the limit is kept. The
+summary is updated the same way each time, saved in the chat's file in `DATA_DIR`, and given to the
+model with every message.
+
+- Summaries are written after the reply is sent, so they never delay an answer. A message sent in
+  the meantime waits until the summary is done; `/status` shows "updating memory" and `/stop` cancels it.
+- If a summary fails (Ollama offline, error), the messages are kept and it's tried again after the
+  next reply. If it keeps failing, the oldest messages are dropped at twice `HISTORY_LIMIT`.
+- `/summary` shows what it remembers; `/reset` clears the summary too.
+- `HISTORY_SUMMARY=false` turns this off: older messages are simply dropped.
 
 ## Tools (MCP)
 

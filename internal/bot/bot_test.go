@@ -52,6 +52,7 @@ type fakeLLM struct {
 	gate    chan struct{} // if set, Chat blocks until it's closed
 	pingErr error
 	chatErr error
+	failOn  string // if set, Chat fails when any message contains it
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -59,6 +60,11 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 	f.last, f.model, f.think = msgs, model, think
 	f.calls++
 	gate, chatErr := f.gate, f.chatErr
+	for _, m := range msgs {
+		if f.failOn != "" && strings.Contains(m.Content, f.failOn) {
+			chatErr = errors.New("failed on purpose")
+		}
+	}
 	f.mu.Unlock()
 	if gate != nil {
 		select {
@@ -452,4 +458,103 @@ func waitBusy(t *testing.T, b testBot, sender string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("model call never started")
+}
+
+func TestSummary(t *testing.T) {
+	b, m, l, st := setup(t)
+	b.opt.Summarize = true // HistoryLimit is 4: summarize past 4 messages, keep the newest 2
+
+	for _, s := range []string{"one", "two"} {
+		b.Handle(dm(me, s))
+		reply(t, m)
+	}
+	b.Handle(dm(me, "/summary"))
+	if r := reply(t, m); !strings.HasPrefix(r, "No summary yet") {
+		t.Fatalf("empty summary: %q", r)
+	}
+
+	b.Handle(dm(me, "three")) // 6 messages: one and two are summarized after the reply
+	reply(t, m)
+	chat := waitSummary(t, st)
+	b.Handle(dm(me, "/status"))
+	if r := reply(t, m); !strings.Contains(r, "Memory: 2 messages (max 4) + summary") {
+		t.Fatalf("status: %q", r)
+	}
+	if len(chat.History) != 2 || chat.History[0].Content != "three" {
+		t.Fatalf("history after summary: %+v", chat.History)
+	}
+	// The fake model echoes the prompt, so the summary shows what it was given.
+	for _, want := range []string{"Existing summary:\n(none yet)", "User: one", "Assistant: echo: two"} {
+		if !strings.Contains(chat.Summary, want) {
+			t.Fatalf("summary missing %q: %q", want, chat.Summary)
+		}
+	}
+	if strings.Contains(chat.Summary, "three") {
+		t.Fatalf("summarized kept messages: %q", chat.Summary)
+	}
+
+	b.Handle(dm(me, "four"))
+	reply(t, m)
+	l.mu.Lock()
+	got := l.last
+	l.mu.Unlock()
+	if got[1].Role != "system" || !strings.Contains(got[1].Content, "User: one") || got[2].Content != "three" {
+		t.Fatalf("summary not in prompt: %+v", got)
+	}
+
+	b.Handle(dm(me, "/summary"))
+	if r := reply(t, m); !strings.Contains(r, "User: one") {
+		t.Fatalf("/summary: %q", r)
+	}
+	b.Handle(dm(me, "/reset"))
+	reply(t, m)
+	if c, _ := st.Load(me); c.Summary != "" || len(c.History) != 0 {
+		t.Fatalf("reset kept memory: %+v", c)
+	}
+}
+
+func TestSummaryFailureKeepsMessages(t *testing.T) {
+	b, m, l, st := setup(t)
+	b.opt.Summarize = true
+	l.failOn = "Existing summary:"
+
+	for _, s := range []string{"one", "two", "three", "four", "five"} {
+		b.Handle(dm(me, s))
+		if r := reply(t, m); r != "echo: "+s {
+			t.Fatalf("got %q", r)
+		}
+	}
+	chat, _ := st.Load(me)
+	// Nothing summarized, so nothing dropped until twice the limit.
+	if chat.Summary != "" || len(chat.History) != 8 || chat.History[0].Content != "two" {
+		t.Fatalf("after failed summaries: summary %q, history %+v", chat.Summary, chat.History)
+	}
+}
+
+func waitSummary(t *testing.T, st *store.Store) store.Chat {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, _ := st.Load(me); c.Summary != "" {
+			return c
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("no summary saved")
+	return store.Chat{}
+}
+
+func TestSplitPoint(t *testing.T) {
+	h := []ollama.Message{{Role: "user"}, {Role: "assistant"}, {Role: "user"}, {Role: "assistant"},
+		{Role: "user"}, {Role: "assistant"}}
+	for _, c := range []struct{ n, limit, want int }{
+		{4, 4, 0}, // not over the limit
+		{6, 4, 4}, // keep the newest 2
+		{6, 2, 4}, // keeping 1 would start with a reply, so keep the whole last exchange
+		{5, 4, 2}, // kept part starts with a user message
+	} {
+		if got := splitPoint(h[:c.n], c.limit); got != c.want {
+			t.Errorf("splitPoint(%d msgs, limit %d) = %d, want %d", c.n, c.limit, got, c.want)
+		}
+	}
 }

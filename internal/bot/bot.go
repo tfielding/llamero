@@ -45,6 +45,8 @@ type Options struct {
 	DefaultModel  string
 	SystemPrompt  string
 	HistoryLimit  int
+	Summarize     bool          // fold messages past HistoryLimit into a running summary instead of dropping them
+	SummaryModel  string        // model that writes summaries; empty = the chat's model
 	TypingRefresh time.Duration // Signal clients hide the indicator after ~15s
 }
 
@@ -64,6 +66,7 @@ type activity struct {
 	model   string
 	started time.Time
 	tool    string             // tool currently running, if any
+	task    string             // background work instead of a reply, e.g. "updating memory"
 	cancel  context.CancelFunc // stops this model call (/stop)
 }
 
@@ -166,6 +169,9 @@ func (b *Bot) process(ctx context.Context, sender, text string, queued int) {
 		return
 	}
 	slog.Info("reply sent", "to", mask(sender), "chars", len(r.text), "images", len(r.images), "took", time.Since(start).Round(100*time.Millisecond))
+	if r.summarize {
+		b.summarize(ctx, sender)
+	}
 }
 
 // send delivers a reply. Model replies are Markdown, converted to Signal formatting;

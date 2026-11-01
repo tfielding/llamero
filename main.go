@@ -78,9 +78,11 @@ func run() error {
 		DefaultModel: cfg.DefaultModel,
 		SystemPrompt: cfg.SystemPrompt,
 		HistoryLimit: cfg.HistoryLimit,
+		Summarize:    cfg.Summarize,
+		SummaryModel: cfg.SummaryModel,
 	})
 
-	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed))
+	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()
 	if errors.Is(err, context.Canceled) {

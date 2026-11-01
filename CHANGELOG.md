@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Long chats are summarized instead of forgotten: messages past `HISTORY_LIMIT` are folded into a
+  running summary that is saved with the chat and given to the model. New `/summary` command;
+  `HISTORY_SUMMARY` (default `true`) and `SUMMARY_MODEL` settings.
+
 ### Changed
 - Docker `:latest` now points to the newest release. Builds from `main` are published as `:edge`,
   and releases also get a `major.minor` tag (e.g. `:0.1`).

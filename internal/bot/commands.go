@@ -13,7 +13,7 @@ import (
 
 func instant(text string) bool {
 	f := strings.Fields(strings.ToLower(text))
-	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop")
+	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary")
 }
 
 func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text string) string {
@@ -28,7 +28,7 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 	case "/help":
 		return helpText
 	case "/reset":
-		chat.History = nil
+		chat.History, chat.Summary = nil, ""
 		if err := b.store.Save(sender, *chat); err != nil {
 			return "Couldn't reset: " + err.Error()
 		}
@@ -41,14 +41,20 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		} else if info, err := b.thinkInfo(ctx, current); err == nil {
 			thinking = thinkLabel(chat.Think, info)
 		}
-		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %d messages (max %d)\nOllama: %s\n%sNow: %s",
-			current, thinking, len(chat.History), b.opt.HistoryLimit, ollamaState, b.toolsStatus(ctx), b.now(sender))
+		memory := fmt.Sprintf("%d messages (max %d)", len(chat.History), b.opt.HistoryLimit)
+		if chat.Summary != "" {
+			memory += " + summary of older ones"
+		}
+		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %s\nOllama: %s\n%sNow: %s",
+			current, thinking, memory, ollamaState, b.toolsStatus(ctx), b.now(sender))
 	case "/think":
 		return b.thinkCommand(ctx, sender, chat, current, args)
 	case "/stop":
 		return b.stop(sender)
 	case "/stats":
 		return statsText(chat.Last)
+	case "/summary":
+		return b.summaryText(chat.Summary)
 	case "/model":
 		models, err := b.llm.Models(ctx)
 		if err != nil {
@@ -94,6 +100,7 @@ const helpText = `Commands:
 /model - list models
 /model <name> - switch model
 /reset - clear conversation memory
+/summary - what it remembers from older messages
 /status - model, memory, and what's running now
 /think - show or change reasoning (on, off, low, medium, high, default)
 /stop - cancel the reply in progress (and anything waiting)
@@ -167,6 +174,9 @@ func (b *Bot) now(sender string) string {
 	s := "idle"
 	if busy {
 		s = fmt.Sprintf("%s thinking for %s", a.model, time.Since(a.started).Round(time.Second))
+		if a.task != "" {
+			s = fmt.Sprintf("%s %s for %s", a.model, a.task, time.Since(a.started).Round(time.Second))
+		}
 		if a.tool != "" {
 			s += " (running " + a.tool + ")"
 		}

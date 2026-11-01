@@ -24,6 +24,8 @@ type Config struct {
 	Allowed       map[string]bool // phone numbers (or Signal UUIDs) allowed to talk to the bot
 	DataDir       string          // where chat history is stored
 	HistoryLimit  int             // max messages (user+assistant) kept per chat
+	Summarize     bool            // summarize messages past HistoryLimit instead of dropping them
+	SummaryModel  string          // model that writes summaries; empty = the chat's model
 	SystemPrompt  string
 	OllamaTimeout time.Duration
 
@@ -42,6 +44,7 @@ func Load() (Config, error) {
 		Allowed:      map[string]bool{},
 		DataDir:      env("DATA_DIR", "/data"),
 		SystemPrompt: env("SYSTEM_PROMPT", defaultSystemPrompt),
+		SummaryModel: os.Getenv("SUMMARY_MODEL"),
 	}
 
 	if c.SignalNumber == "" {
@@ -59,6 +62,9 @@ func Load() (Config, error) {
 	var err error
 	if c.HistoryLimit, err = strconv.Atoi(env("HISTORY_LIMIT", "40")); err != nil || c.HistoryLimit < 2 {
 		return c, fmt.Errorf("HISTORY_LIMIT must be an integer >= 2")
+	}
+	if c.Summarize, err = strconv.ParseBool(env("HISTORY_SUMMARY", "true")); err != nil {
+		return c, fmt.Errorf("HISTORY_SUMMARY must be true or false")
 	}
 	if c.OllamaTimeout, err = time.ParseDuration(env("OLLAMA_TIMEOUT", "5m")); err != nil {
 		return c, fmt.Errorf("OLLAMA_TIMEOUT: %w", err)
