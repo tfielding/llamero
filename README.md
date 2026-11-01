@@ -124,7 +124,8 @@ Reply yes to run it, anything else cancels (2 min).
 - The arguments shown are exactly what will be sent. If the model passed a value the tool doesn't
   take, it's listed as left out, since that can make an action broader than you meant.
 - Reply **yes** (or ok, sure, 👍) to run it. Any other reply cancels it, and the model sees what you
-  wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too.
+  wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too. After a
+  timeout or a second "no", the model doesn't try any more actions for that message.
 - Commands still work meanwhile: `/status` shows what's waiting, `/stop` cancels the whole reply.
 - If an approved call fails and the model tries again, the next prompt starts with
   "The last try failed: …" so you can see why.

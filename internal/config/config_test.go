@@ -100,7 +100,7 @@ func TestWakeOnLAN(t *testing.T) {
 func TestAllowWrite(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
 	t.Setenv("ALLOWED_SENDERS", "+15550000001")
-	t.Setenv("MCP_SERVERS", "ha=http://ha:9583/mcp")
+	t.Setenv("MCP_SERVERS", "tools=http://tools:9000/mcp")
 	for v, want := range map[string][2]bool{"": {false, false}, "false": {false, false}, "true": {true, false}, "ASK": {true, true}} {
 		t.Setenv("MCP_ALLOW_WRITE", v)
 		c, err := Load()
@@ -128,6 +128,20 @@ func TestReaction(t *testing.T) {
 		t.Setenv("REACTION", v)
 		if c, _ := Load(); c.Reaction != want {
 			t.Errorf("REACTION=%q: got %q, want %q", v, c.Reaction, want)
+		}
+	}
+}
+
+func TestSafeURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"http://tools:9000/mcp":                "http://tools:9000/mcp",
+		"http://user:pw@tools:9000/mcp":        "http://tools:9000/mcp",
+		"http://tools:9000/mcp?token=SECRET":   "http://tools:9000/mcp?…",
+		"http://tools:9000/mcp#key=SECRET":     "http://tools:9000/mcp?…",
+		"https://u:p@h/mcp?api_key=SECRET#x=y": "https://h/mcp?…",
+	} {
+		if got := safeURL(in); got != want || strings.Contains(got, "SECRET") {
+			t.Errorf("safeURL(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

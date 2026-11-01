@@ -67,7 +67,7 @@ type fakeLLM struct {
 	failOn   string           // if set, Chat fails when any message contains it
 	caps     []string         // capabilities reported for models without other metadata
 	toolCall *ollama.ToolCall // if set, the model calls this tool when tools are offered
-	retry    bool             // and calls it again after it fails
+	retry    bool             // and calls it again after any tool result (an error or a decline)
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -92,7 +92,7 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 		return ollama.Result{}, chatErr
 	}
 	last := msgs[len(msgs)-1]
-	if f.toolCall != nil && len(tools) > 0 && (last.Role == "user" || (f.retry && strings.HasPrefix(last.Content, "Tool returned an error"))) {
+	if f.toolCall != nil && len(tools) > 0 && (last.Role == "user" || (f.retry && last.Role == "tool")) {
 		return ollama.Result{ToolCalls: []ollama.ToolCall{*f.toolCall}}, nil
 	}
 	return ollama.Result{
@@ -794,5 +794,39 @@ func TestRetry(t *testing.T) {
 	}
 	if c, _ := st.Load(me); len(c.History) != 2 || c.History[1].Content != "echo: hi" {
 		t.Fatalf("history after failed retry: %+v", c.History)
+	}
+}
+
+func TestRetryAfterFailure(t *testing.T) {
+	b, m, l, st := setup(t)
+	b.Handle(dm(me, "first"))
+	reply(t, m)
+	l.mu.Lock()
+	l.chatErr = errors.New("boom")
+	l.mu.Unlock()
+	b.Handle(dm(me, "second"))
+	if r := reply(t, m); !strings.HasPrefix(r, "Model error") {
+		t.Fatalf("got %q", r)
+	}
+	l.mu.Lock()
+	l.chatErr = nil
+	l.mu.Unlock()
+	b.Handle(dm(me, "/retry"))
+	if r := reply(t, m); r != "echo: second" {
+		t.Fatalf("retried the wrong message: %q", r)
+	}
+	c, _ := st.Load(me)
+	if c.Unanswered != "" || len(c.History) != 4 || c.History[0].Content != "first" || c.History[2].Content != "second" {
+		t.Fatalf("history: %+v, unanswered %q", c.History, c.Unanswered)
+	}
+}
+
+func TestWakeSendFails(t *testing.T) {
+	b, m, l, _ := setup(t)
+	l.pingErr = refused
+	b.opt.Wake = func(context.Context) error { return errors.New("network unreachable") }
+	b.Handle(dm(me, "hello"))
+	if r := reply(t, m); r != offlineText {
+		t.Fatalf("got %q", r)
 	}
 }

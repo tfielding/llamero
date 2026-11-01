@@ -33,7 +33,7 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 	case "/help":
 		return helpText
 	case "/reset":
-		chat.History, chat.Summary = nil, ""
+		chat.History, chat.Summary, chat.Unanswered = nil, "", ""
 		if err := b.store.Save(sender, *chat); err != nil {
 			return "Couldn't reset: " + err.Error()
 		}

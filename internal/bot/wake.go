@@ -13,12 +13,15 @@ import (
 // errStopped means /stop cancelled the wait; /stop has already replied.
 var errStopped = errors.New("stopped")
 
+// errWakeSend means the wake-up couldn't be sent at all.
+var errWakeSend = errors.New("couldn't send wake-on-lan")
+
 // wake sends a wake-up to the Ollama machine, tells sender, and waits until Ollama
 // answers or WakeWait passes. /status shows the wait and /stop cancels it.
 func (b *Bot) wake(ctx context.Context, sender string) error {
 	if err := b.opt.Wake(ctx); err != nil {
 		slog.Error("wake-on-lan failed", "err", err)
-		return err
+		return fmt.Errorf("%w: %v", errWakeSend, err)
 	}
 	slog.Info("wake-on-lan sent, waiting for ollama", "wait", b.opt.WakeWait)
 	if err := b.msg.Send(ctx, sender, "Ollama is asleep, waking it up…", false, nil); err != nil {

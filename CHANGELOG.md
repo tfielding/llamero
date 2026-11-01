@@ -15,14 +15,18 @@ All notable changes to this project are documented here. The format follows
   It also wakes the machine at startup when the bot is waiting for Ollama to pick a model.
 - `MCP_ALLOW_WRITE=ask`: tools that can change things are offered, but each call waits for your
   approval in Signal (yes to run, anything else cancels, 2-minute timeout). If an approved call
-  fails and the model retries, the next prompt shows the error.
+  fails and the model retries, the next prompt shows the error. After a timeout or a second "no",
+  no more actions are tried for that message.
+- If the model calls a tool name that doesn't exist, it's told the exact names that do, instead
+  of the user being asked to approve it.
 - Replies to earlier messages (Signal's swipe-to-reply) pass the quoted text to the model, so
   "explain this part" refers to the right message.
 - A 👀 reaction on your message while it's being answered, removed once the reply is sent
   (`REACTION` to change the emoji, `off` to disable).
-- `/retry` answers your last message again, replacing the previous answer.
+- `/retry` answers your last message again: the one that failed (error, offline, `/stop`) if
+  any, otherwise the last one answered, replacing its answer.
 - `/settings` shows the current configuration. MCP tokens are never shown, phone numbers are
-  masked and credentials are removed from URLs.
+  masked, and credentials and query strings are removed from URLs.
 
 ### Changed
 - `/model` is now `/models` (`/models` lists, `/models <name>` switches). `/model` still works.

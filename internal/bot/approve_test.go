@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
@@ -228,5 +229,69 @@ func TestApprovalRetryShowsError(t *testing.T) {
 	// The fake model calls the tool again after the failure.
 	if r := reply(t, m); !strings.HasPrefix(r, "The last try failed: No entities matched 'kitchen'\n\nAllow turn_off?") {
 		t.Fatalf("retry prompt: %q", r)
+	}
+}
+
+func TestUnknownToolNotOfferedForApproval(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	l.toolCall.Function.Name = "media__unpause" // not a real tool
+	b.Handle(dm(me, "unpause the speakers"))
+	r := reply(t, m)
+	if strings.Contains(r, "Allow") {
+		t.Fatalf("asked to approve a tool that doesn't exist: %q", r)
+	}
+	if ft.called() != 0 {
+		t.Fatal("called a tool that doesn't exist")
+	}
+	want := `Tool failed: there is no tool named "media__unpause", so nothing was run. Use one of these exact names: turn_off, get_state.`
+	if got := lastTool(l); got != want {
+		t.Fatalf("model told:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestTimeoutEndsToolUse(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	ft.fail, l.retry = "failed", true
+	b.opt.ApprovalTimeout = 30 * time.Millisecond
+	b.Handle(dm(me, "turn off the kitchen light"))
+	reply(t, m) // prompt
+	if r := reply(t, m); strings.HasPrefix(r, "Allow") {
+		t.Fatalf("asked again after a timeout: %q", r)
+	}
+}
+
+func TestTwoDeclinesEndToolUse(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	l.retry = true
+	ft.fail = "failed" // so the model keeps retrying
+	b.Handle(dm(me, "turn off the kitchen light"))
+	reply(t, m) // prompt 1
+	b.Handle(dm(me, "yes"))
+	reply(t, m) // prompt 2, after the failure
+	b.Handle(dm(me, "no"))
+	reply(t, m) // prompt 3
+	b.Handle(dm(me, "no"))
+	if r := reply(t, m); strings.HasPrefix(r, "Allow") || strings.HasPrefix(r, "The last try") {
+		t.Fatalf("asked again after two declines: %q", r)
+	}
+	expectSilence(t, m)
+}
+
+func TestSecondMessageDuringApprovalIsKept(t *testing.T) {
+	b, _, _, _ := setup(t)
+	ch := make(chan string, 1)
+	ch <- "no" // answered, but approve hasn't picked it up yet
+	b.mu.Lock()
+	b.approvals[me] = ch
+	b.mu.Unlock()
+	if b.answer(me, "turn on the bedroom one instead") {
+		t.Fatal("second message was swallowed by the approval")
+	}
+}
+
+func TestSnippetKeepsRunesWhole(t *testing.T) {
+	s := snippet("é"+strings.Repeat("é", 10), 5) // 2 bytes each: byte 5 is mid-rune
+	if !utf8.ValidString(s) || s != "éé…" {
+		t.Fatalf("got %q", s)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/store"
@@ -38,14 +39,18 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 		return response{text: "Couldn't load chat history: " + err.Error()}
 	}
 	if isRetry(text) {
-		// Answer the last message again. The old answer is only replaced once the new one
-		// is saved, so a failed retry keeps it.
+		// Answer again the last message that failed, or else the last one answered. The
+		// old answer is only replaced once the new one is saved, so a failed retry keeps it.
 		n := len(chat.History)
-		if n < 2 || chat.History[n-2].Role != "user" || chat.History[n-1].Role != "assistant" {
+		switch {
+		case chat.Unanswered != "":
+			text = chat.Unanswered
+		case n >= 2 && chat.History[n-2].Role == "user" && chat.History[n-1].Role == "assistant":
+			text = chat.History[n-2].Content
+			chat.History = chat.History[:n-2]
+		default:
 			return response{text: "Nothing to retry yet."}
 		}
-		text = chat.History[n-2].Content
-		chat.History = chat.History[:n-2]
 	} else if strings.HasPrefix(text, "/") {
 		return response{text: b.command(ctx, sender, &chat, text)}
 	}
@@ -70,13 +75,15 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if err := b.llm.Ping(ctx); err != nil {
 		slog.Warn("ollama unreachable", "err", err)
 		if b.opt.Wake == nil {
-			return response{text: offlineText}
+			return b.unanswered(sender, text, response{text: offlineText})
 		}
 		switch err := b.wake(ctx, sender); {
 		case errors.Is(err, errStopped):
-			return response{}
+			return b.unanswered(sender, text, response{})
+		case errors.Is(err, errWakeSend):
+			return b.unanswered(sender, text, response{text: offlineText})
 		case err != nil:
-			return response{text: wakeFailedText}
+			return b.unanswered(sender, text, response{text: wakeFailedText})
 		}
 	}
 	info, _ := b.llm.Info(ctx, model)
@@ -114,16 +121,16 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	delete(b.active, sender)
 	b.mu.Unlock()
 	if err != nil && callCtx.Err() != nil && ctx.Err() == nil {
-		// Cancelled by /stop, which already replied. Nothing is saved.
+		// Cancelled by /stop, which already replied. Only kept for /retry.
 		slog.Info("model call stopped", "model", model, "took", time.Since(start).Round(100*time.Millisecond))
-		return response{}
+		return b.unanswered(sender, text, response{})
 	}
 	if err != nil {
 		slog.Error("ollama chat", "model", model, "took", time.Since(start).Round(100*time.Millisecond), "err", err)
 		if unreachable(err) {
-			return response{text: offlineText}
+			return b.unanswered(sender, text, response{text: offlineText})
 		}
-		return response{text: "Model error: " + err.Error()}
+		return b.unanswered(sender, text, response{text: "Model error: " + err.Error()})
 	}
 	slog.Info("model replied", "model", model, "took", time.Since(start).Round(100*time.Millisecond),
 		"tokens", stats.EvalCount, "tok_per_s", fmt.Sprintf("%.1f", stats.TokensPerSecond()), "images", len(images))
@@ -132,6 +139,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	}
 
 	chat.Last = &store.LastReply{Model: model, At: time.Now(), Stats: stats}
+	chat.Unanswered = ""
 	saved := answer
 	if len(images) > 0 {
 		saved += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", len(images))
@@ -152,6 +160,21 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 		summarize: b.opt.Summarize && len(chat.History) > b.opt.HistoryLimit}
 }
 
+// unanswered records text as the message /retry should answer, and returns r. It reloads
+// the chat so a failed /retry doesn't save the history with the old answer removed.
+func (b *Bot) unanswered(sender, text string, r response) response {
+	chat, err := b.store.Load(sender)
+	if err != nil {
+		slog.Error("load history", "err", err)
+		return r
+	}
+	chat.Unanswered = text
+	if err := b.store.Save(sender, chat); err != nil {
+		slog.Error("save history", "err", err)
+	}
+	return r
+}
+
 // run asks the model, executing any tool calls it makes, until it gives a final answer.
 // Images returned by tools are collected to send to the user, and shown to the model
 // too if it supports vision.
@@ -166,8 +189,10 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 	var stats ollama.Stats
 	failures := 0
 	lastFailure := "" // error from the previous tool call, shown if the next one needs approval
+	declines := 0
+	toolsOver := false // the user declined twice or didn't answer: no more tool calls
 	for round := 0; ; round++ {
-		if round == maxToolRounds || failures >= maxToolFailures {
+		if round == maxToolRounds || failures >= maxToolFailures || toolsOver {
 			if len(defs) > 0 {
 				slog.Warn("no more tool calls for this message, asking for a final answer", "rounds", round, "failures", failures)
 				msgs = append(msgs, ollama.Message{Role: "system", Content: "Tool use is over for this message. " +
@@ -190,13 +215,29 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 		msgs = append(msgs, ollama.Message{Role: "assistant", Content: res.Content, Thinking: res.Thinking, ToolCalls: res.ToolCalls})
 		for _, tc := range res.ToolCalls {
 			name := tc.Function.Name
+			if toolsOver {
+				msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: "Not run: no more actions for this message."})
+				continue
+			}
+			// Small models invent tool names. Don't ask the user to approve something that
+			// can't run: tell the model what exists so it can correct the name.
+			if _, ok := findTool(tools, name); !ok {
+				slog.Warn("model called a tool that doesn't exist", "tool", name)
+				failures++
+				lastFailure = fmt.Sprintf("there is no tool named %q", name)
+				msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: unknownTool(name, tools)})
+				continue
+			}
 			if b.needsApproval(tools, name) {
-				decline, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments, lastFailure)
+				decline, timedOut, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments, lastFailure)
 				if err != nil {
 					return "", nil, stats, err
 				}
 				lastFailure = ""
 				if decline != "" {
+					// Don't keep asking someone who said no twice or isn't there.
+					declines++
+					toolsOver = timedOut || declines >= 2
 					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: decline})
 					continue
 				}
@@ -259,6 +300,16 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 	}
 }
 
+// unknownTool tells the model a tool doesn't exist and lists the ones that do.
+func unknownTool(name string, tools []toolbox.Tool) string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+	return fmt.Sprintf("Tool failed: there is no tool named %q, so nothing was run. Use one of these exact names: %s.",
+		name, strings.Join(names, ", "))
+}
+
 // emptyAnswer explains a blank reply instead of sending nothing useful.
 func emptyAnswer(failures, rounds int) string {
 	if failures > 0 {
@@ -273,6 +324,9 @@ func emptyAnswer(failures, rounds int) string {
 func snippet(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > n {
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
 		return s[:n] + "…"
 	}
 	return s
@@ -304,11 +358,19 @@ func (b *Bot) typing(ctx context.Context, to string) (stop func()) {
 		defer close(finished)
 		t := time.NewTicker(b.opt.TypingRefresh)
 		defer t.Stop()
+		paused := false
 		for {
 			if b.awaiting(to) {
-				// Paused while the user is asked to approve a tool call.
+				// Off while the user is asked to approve a tool call. approve turns it off
+				// too, but this catches an "on" sent at the same moment.
+				if !paused {
+					_ = b.msg.Typing(ctx, to, false)
+					paused = true
+				}
 			} else if err := b.msg.Typing(ctx, to, true); err != nil {
 				slog.Warn("typing indicator failed", "err", err)
+			} else {
+				paused = false
 			}
 			select {
 			case <-done:

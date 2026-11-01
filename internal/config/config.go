@@ -133,7 +133,7 @@ func env(key, def string) string {
 
 // Describe lists the effective settings by environment variable, for /settings.
 // Secrets are never shown: tokens appear only as "set", phone numbers are masked
-// and credentials in URLs are removed.
+// and credentials and query strings in URLs are removed.
 func (c Config) Describe() string {
 	model := c.DefaultModel
 	if os.Getenv("OLLAMA_MODEL") == "" {
@@ -224,12 +224,17 @@ func mask(s string) string {
 	return "…" + s[len(s)-4:]
 }
 
-// safeURL drops any user:password from a URL.
+// safeURL drops the parts of a URL that can hold secrets: user:password, the query
+// string (e.g. ?token=…) and the fragment.
 func safeURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "(invalid URL)"
 	}
-	u.User = nil
+	hidden := u.RawQuery != "" || u.Fragment != ""
+	u.User, u.RawQuery, u.Fragment, u.RawFragment = nil, "", "", ""
+	if hidden {
+		return u.String() + "?…"
+	}
 	return u.String()
 }

@@ -15,7 +15,7 @@ import (
 )
 
 // needsApproval reports whether calling name must be approved first. Tools not in the
-// list are treated as able to change things.
+// list are treated as able to change things (run rejects them before this anyway).
 func (b *Bot) needsApproval(tools []toolbox.Tool, name string) bool {
 	if !b.opt.ConfirmWrites {
 		return false
@@ -34,13 +34,14 @@ func findTool(tools []toolbox.Tool, name string) (toolbox.Tool, bool) {
 }
 
 // approve asks sender to allow a tool call and waits for the answer. It returns "" if
-// approved, or what to tell the model instead of running the tool. The error is set
+// approved, or what to tell the model instead of running the tool, and whether the
+// request timed out. The error is set
 // only when ctx ends (e.g. /stop). lastFailure, if set, is the error from the tool call
 // just before, shown so a retry doesn't come out of nowhere.
 //
 // While it waits, the sender's next message (other than a command) is the answer:
 // see answer, called from Handle.
-func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, name string, args map[string]any, lastFailure string) (string, error) {
+func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, name string, args map[string]any, lastFailure string) (decline string, timedOut bool, err error) {
 	ch := make(chan string, 1)
 	b.mu.Lock()
 	b.approvals[sender] = ch
@@ -61,7 +62,7 @@ func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, 
 
 	if err := b.msg.Send(ctx, sender, approvalPrompt(tools, name, args, lastFailure, b.opt.ApprovalTimeout), false, nil); err != nil {
 		slog.Error("send approval request", "err", err)
-		return "Couldn't ask the user for approval, so this action was NOT run.", nil
+		return "Couldn't ask the user for approval, so this action was NOT run.", false, nil
 	}
 	_ = b.msg.Typing(ctx, sender, false)
 
@@ -69,21 +70,21 @@ func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, 
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", false, ctx.Err()
 	case <-timer.C:
 		slog.Info("tool approval", "tool", name, "result", "timed out")
-		return fmt.Sprintf("The user didn't approve within %s, so this action was NOT run.", b.opt.ApprovalTimeout), nil
+		return fmt.Sprintf("The user didn't approve within %s, so this action was NOT run.", b.opt.ApprovalTimeout), true, nil
 	case reply := <-ch:
 		if approved(reply) {
 			slog.Info("tool approval", "tool", name, "result", "approved")
-			return "", nil
+			return "", false, nil
 		}
 		slog.Info("tool approval", "tool", name, "result", "declined")
 		msg := "The user declined, so this action was NOT run. Don't try it again unless they ask."
 		if !declined(reply) {
 			msg += fmt.Sprintf(" They replied: %q", reply)
 		}
-		return msg, nil
+		return msg, false, nil
 	}
 }
 
@@ -100,9 +101,10 @@ func (b *Bot) answer(sender, text string) bool {
 	}
 	select {
 	case ch <- text:
-	default: // already answered
+		return true
+	default: // already answered: handle this message normally
+		return false
 	}
-	return true
 }
 
 // awaiting reports whether sender is being asked to approve something.
