@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows
   approval in Signal (yes to run, anything else cancels, 2-minute timeout). If an approved call
   fails and the model retries, the next prompt shows the error. After a timeout or a second "no",
   no more actions are tried for that message.
+- A single value sent for a tool parameter that takes a list (`"domain": "light"`) is wrapped
+  in a list instead of being rejected by the server.
 - If the model calls a tool name that doesn't exist, it's told the exact names that do, instead
   of the user being asked to approve it.
 - Replies to earlier messages (Signal's swipe-to-reply) pass the quoted text to the model, so

@@ -243,9 +243,64 @@ func cleanArgs(schema any, args map[string]any) (map[string]any, []string) {
 		return clean, blank
 	}
 	args, dropped := cleanUndeclared(schema, args)
+	args = wrapLists(schema, args)
 	dropped = append(dropped, blank...)
 	sort.Strings(dropped)
 	return args, dropped
+}
+
+// wrapLists turns a single value into a one-item list where the schema wants a list.
+// Small models often send "domain": "light" for a parameter typed as an array, which
+// the server rejects, and they repeat the same call when told so.
+func wrapLists(schema any, args map[string]any) map[string]any {
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		return args
+	}
+	var s struct {
+		Properties map[string]struct {
+			Type any `json:"type"` // "array", or a list of types
+		} `json:"properties"`
+	}
+	if json.Unmarshal(raw, &s) != nil {
+		return args
+	}
+	var out map[string]any
+	for k, v := range args {
+		if _, isList := v.([]any); isList || !onlyArray(s.Properties[k].Type) {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(args)
+		}
+		out[k] = []any{v}
+	}
+	if out == nil {
+		return args
+	}
+	return out
+}
+
+// onlyArray reports whether a JSON schema "type" allows an array and nothing else
+// that a single value could already be (e.g. "array", or ["array", "null"]).
+func onlyArray(t any) bool {
+	switch x := t.(type) {
+	case string:
+		return x == "array"
+	case []any:
+		hasArray := false
+		for _, e := range x {
+			switch e {
+			case "array":
+				hasArray = true
+			case "null":
+			default:
+				return false
+			}
+		}
+		return hasArray
+	}
+	return false
 }
 
 func cleanUndeclared(schema any, args map[string]any) (map[string]any, []string) {

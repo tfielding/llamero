@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -284,5 +285,21 @@ func TestGuidanceFromServerAndConfig(t *testing.T) {
 	}
 	if box.Guidance(nil) != "" {
 		t.Fatal("guidance without tools")
+	}
+}
+
+func TestWrapLists(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{
+		"kind":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"tags":  map[string]any{"type": []any{"array", "null"}},
+		"name":  map[string]any{"type": "string"},
+		"value": map[string]any{"type": []any{"array", "string"}}, // a string is fine as is
+	}}
+	got, dropped := cleanArgs(schema, map[string]any{
+		"kind": "lamp", "tags": []any{"a"}, "name": "Office", "value": "x",
+	})
+	want := map[string]any{"kind": []any{"lamp"}, "tags": []any{"a"}, "name": "Office", "value": "x"}
+	if !reflect.DeepEqual(got, want) || len(dropped) != 0 {
+		t.Fatalf("got %v (dropped %v), want %v", got, dropped, want)
 	}
 }
