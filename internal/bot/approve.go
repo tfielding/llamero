@@ -143,7 +143,7 @@ func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, time
 	return sb.String()
 }
 
-// displayName drops a namespace prefix such as "intent__" from a tool name.
+// displayName drops a namespace prefix such as "devices__" from a tool name.
 func displayName(name string) string {
 	if i := strings.LastIndex(name, "__"); i >= 0 && i+2 < len(name) {
 		return name[i+2:]

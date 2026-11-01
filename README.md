@@ -115,7 +115,7 @@ With `MCP_ALLOW_WRITE=ask`, tools that can change things (lights, locks, alarms)
 model, but each call waits for your OK:
 
 ```
-Allow HassTurnOff?
+Allow switch_off?
 • name: kitchen light
 Reply yes to run it, anything else cancels (2 min).
 ```

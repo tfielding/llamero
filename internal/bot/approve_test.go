@@ -171,19 +171,19 @@ func TestApprovalWords(t *testing.T) {
 
 func TestApprovalPrompt(t *testing.T) {
 	schema := map[string]any{"type": "object", "properties": map[string]any{
-		"area": map[string]any{}, "name": map[string]any{}, "domain": map[string]any{}, "device_class": map[string]any{}}}
-	tools := []toolbox.Tool{{Name: "intent__HassTurnOn", Schema: schema}}
-	// What gpt-oss sent to Home Assistant: empty filters and a blank undeclared "floor".
-	args := map[string]any{"area": "Office", "name": "Light", "device_class": []any{}, "domain": []any{}, "floor": ""}
-	want := "Allow HassTurnOn?\n• area: Office\n• name: Light\nReply yes to run it, anything else cancels (2 min)."
-	if got := approvalPrompt(tools, "intent__HassTurnOn", args, 2*time.Minute); got != want {
+		"room": map[string]any{}, "name": map[string]any{}, "kind": map[string]any{}, "tags": map[string]any{}}}
+	tools := []toolbox.Tool{{Name: "devices__switch_on", Schema: schema}}
+	// Empty filters and a blank undeclared "floor", as small models often send.
+	args := map[string]any{"room": "Office", "name": "Light", "kind": []any{}, "tags": []any{}, "floor": ""}
+	want := "Allow switch_on?\n• name: Light\n• room: Office\nReply yes to run it, anything else cancels (2 min)."
+	if got := approvalPrompt(tools, "devices__switch_on", args, 2*time.Minute); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 
-	args = map[string]any{"name": "Light", "domain": []any{"light", "switch"}, "floor": "Upstairs"}
-	want = "Allow HassTurnOn?\n• domain: light, switch\n• name: Light\n• left out, the tool doesn't take it: floor: Upstairs\n" +
+	args = map[string]any{"name": "Light", "kind": []any{"lamp", "plug"}, "floor": "Upstairs"}
+	want = "Allow switch_on?\n• kind: lamp, plug\n• name: Light\n• left out, the tool doesn't take it: floor: Upstairs\n" +
 		"Reply yes to run it, anything else cancels (1m30s)."
-	if got := approvalPrompt(tools, "intent__HassTurnOn", args, 90*time.Second); got != want {
+	if got := approvalPrompt(tools, "devices__switch_on", args, 90*time.Second); got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
