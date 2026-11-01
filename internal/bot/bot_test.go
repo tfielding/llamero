@@ -653,3 +653,46 @@ func TestWakeNotConfigured(t *testing.T) {
 		t.Fatalf("got %q", r)
 	}
 }
+
+func TestReplyContext(t *testing.T) {
+	b, m, l, st := setup(t)
+	lastUser := func() string {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		return l.last[len(l.last)-1].Content
+	}
+	send := func(text string, q *signalcli.Quote) string {
+		env := dm(me, text)
+		env.DataMessage.Quote = q
+		b.Handle(env)
+		return reply(t, m)
+	}
+
+	send("explain the second part", &signalcli.Quote{AuthorNumber: own, Text: "First part.\nSecond part."})
+	want := "(Replying to your earlier message:\n> First part.\n> Second part.)\n\nexplain the second part"
+	if got := lastUser(); got != want {
+		t.Fatalf("bot quote:\n%q\nwant\n%q", got, want)
+	}
+	if c, _ := st.Load(me); c.History[0].Content != want {
+		t.Fatalf("saved without quote: %q", c.History[0].Content)
+	}
+
+	send("and this?", &signalcli.Quote{Author: me, Text: "my question"})
+	if got := lastUser(); !strings.HasPrefix(got, "(Replying to their own earlier message:\n> my question)") {
+		t.Fatalf("own quote: %q", got)
+	}
+
+	send("hi", &signalcli.Quote{AuthorNumber: own, Text: strings.Repeat("x", 1500)})
+	if got := lastUser(); !strings.Contains(got, strings.Repeat("x", 1000)+"…)") || strings.Contains(got, strings.Repeat("x", 1001)) {
+		t.Fatal("long quote not cut at 1000 characters")
+	}
+
+	send("plain", &signalcli.Quote{AuthorNumber: own, Text: "  "}) // quote without text (e.g. an image)
+	if got := lastUser(); got != "plain" {
+		t.Fatalf("empty quote: %q", got)
+	}
+
+	if r := send("/stats", &signalcli.Quote{AuthorNumber: own, Text: "something"}); !strings.HasPrefix(r, "Last reply:") {
+		t.Fatalf("command with quote: %q", r)
+	}
+}

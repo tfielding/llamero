@@ -30,6 +30,7 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 - Per-chat conversation memory, saved to disk (`DATA_DIR`): the last `HISTORY_LIMIT` messages, plus a
   running summary of older ones (see [Long chats](#long-chats))
 - Typing indicator while the model is thinking
+- Swipe-to-reply works: when you reply to an earlier message, the model sees which one (up to 1000 characters of it)
 - Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
 - Commands: `/models`, `/models <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/wake` (wake the Ollama machine), `/help`
 - Messages from one person are answered in order; different people don't block each other

@@ -147,7 +147,30 @@ func (b *Bot) accept(env signalcli.Envelope) (sender, text string, ok bool) {
 		slog.Info("ignoring message from sender not on allowlist", "from", mask(sender))
 		return "", "", false
 	}
-	return sender, text, true
+	return sender, withQuote(text, dm.Quote, b.opt.OwnNumber), true
+}
+
+// maxQuoteChars caps how much of a quoted message is passed on.
+const maxQuoteChars = 1000
+
+// withQuote puts the message being replied to (Signal's swipe-to-reply) in front of text,
+// so "explain this part" refers to the right message. Commands are left alone.
+func withQuote(text string, q *signalcli.Quote, own string) string {
+	if q == nil || strings.HasPrefix(text, "/") {
+		return text
+	}
+	quoted := strings.TrimSpace(q.Text)
+	if quoted == "" {
+		return text
+	}
+	if r := []rune(quoted); len(r) > maxQuoteChars {
+		quoted = string(r[:maxQuoteChars]) + "…"
+	}
+	who := "their own earlier message"
+	if own != "" && (q.AuthorNumber == own || q.Author == own) {
+		who = "your earlier message"
+	}
+	return "(Replying to " + who + ":\n> " + strings.ReplaceAll(quoted, "\n", "\n> ") + ")\n\n" + text
 }
 
 func (b *Bot) worker(ctx context.Context, sender string, q chan string) {

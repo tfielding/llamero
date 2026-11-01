@@ -32,6 +32,16 @@ type DataMessage struct {
 	Timestamp int64      `json:"timestamp"`
 	Message   string     `json:"message"`
 	GroupInfo *GroupInfo `json:"groupInfo"`
+	Quote     *Quote     `json:"quote"` // set when the message is a reply to an earlier one
+}
+
+// Quote is the earlier message a reply refers to.
+type Quote struct {
+	ID           int64  `json:"id"` // timestamp of the quoted message
+	Author       string `json:"author"`
+	AuthorNumber string `json:"authorNumber"`
+	AuthorUUID   string `json:"authorUuid"`
+	Text         string `json:"text"`
 }
 
 type GroupInfo struct {
