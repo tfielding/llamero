@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
 ### Added
 - Long chats are summarized instead of forgotten: messages past `HISTORY_LIMIT` are folded into a
   running summary that is saved with the chat and given to the model. New `/summary` command;
