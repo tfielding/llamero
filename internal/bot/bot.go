@@ -45,10 +45,13 @@ type Options struct {
 	DefaultModel  string
 	SystemPrompt  string
 	HistoryLimit  int
-	Summarize     bool          // fold messages past HistoryLimit into a running summary instead of dropping them
-	SummaryModel  string        // model that writes summaries; empty = the chat's model
-	Settings      string        // shown by /settings, with secrets already hidden
-	TypingRefresh time.Duration // Signal clients hide the indicator after ~15s
+	Summarize     bool                        // fold messages past HistoryLimit into a running summary instead of dropping them
+	SummaryModel  string                      // model that writes summaries; empty = the chat's model
+	Settings      string                      // shown by /settings, with secrets already hidden
+	Wake          func(context.Context) error // sends Wake-on-LAN to the Ollama machine; nil = off
+	WakeWait      time.Duration               // how long to wait for Ollama after a wake-up
+	WakePoll      time.Duration               // how often to check while waiting
+	TypingRefresh time.Duration               // Signal clients hide the indicator after ~15s
 }
 
 type Bot struct {
@@ -74,6 +77,12 @@ type activity struct {
 func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	if opt.TypingRefresh == 0 {
 		opt.TypingRefresh = 10 * time.Second
+	}
+	if opt.WakeWait == 0 {
+		opt.WakeWait = time.Minute
+	}
+	if opt.WakePoll == 0 {
+		opt.WakePoll = 2 * time.Second
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan string{}, active: map[string]activity{}}

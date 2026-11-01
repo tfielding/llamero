@@ -31,11 +31,12 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
   running summary of older ones (see [Long chats](#long-chats))
 - Typing indicator while the model is thinking
 - Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
-- Commands: `/models`, `/models <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/help`
+- Commands: `/models`, `/models <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/wake` (wake the Ollama machine), `/help`
 - Messages from one person are answered in order; different people don't block each other
 - Reconnects to Signal automatically
 - Optional tools from MCP servers (e.g. camera snapshots); images that tools return are sent to you as attachments
-- If Ollama is unreachable (e.g. the machine is asleep), replies right away saying so instead of waiting for a timeout
+- If Ollama is unreachable (e.g. the machine is asleep), replies right away saying so instead of waiting for a timeout,
+  or wakes the machine first with Wake-on-LAN (see [Wake-on-LAN](#wake-on-lan))
 
 ## Requirements
 
@@ -58,6 +59,9 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 | `SUMMARY_MODEL` | the chat's model | Model that writes summaries, e.g. a small fast one |
 | `SYSTEM_PROMPT` | short, phone-friendly assistant prompt | Overrides the built-in prompt (including its formatting rules) |
 | `OLLAMA_TIMEOUT` | `5m` | |
+| `OLLAMA_WOL_MAC` | none | MAC address of the Ollama machine. Turns on Wake-on-LAN |
+| `OLLAMA_WOL_ADDR` | `255.255.255.255:9` | Where to send the wake-up. From Docker, use your LAN's broadcast address, e.g. `192.168.1.255:9` |
+| `OLLAMA_WOL_WAIT` | `60s` | How long to wait for Ollama after a wake-up |
 | `DATA_DIR` | `/data` | Chat history (one JSON file per chat) |
 | `MCP_SERVERS` | none | MCP servers to get tools from: `name=url,...`, e.g. `cams=http://go2rtc-mcp:8090/mcp` |
 | `MCP_TOKEN_<NAME>` | none | Bearer token for server `<name>` (uppercased, `-` and `.` become `_`), e.g. `MCP_TOKEN_CAMS` |
@@ -103,6 +107,20 @@ model with every message.
   next reply. If it keeps failing, the oldest messages are dropped at twice `HISTORY_LIMIT`.
 - `/summary` shows what it remembers; `/reset` clears the summary too.
 - `HISTORY_SUMMARY=false` turns this off: older messages are simply dropped.
+
+## Wake-on-LAN
+
+If the Ollama machine sleeps, set `OLLAMA_WOL_MAC` to its MAC address. When a message arrives and
+Ollama is unreachable, the bot sends a wake-up (a Wake-on-LAN magic packet), replies "Ollama is
+asleep, waking it up…", waits up to `OLLAMA_WOL_WAIT` for Ollama to answer, then replies as usual.
+`/status` shows the wait and `/stop` cancels it. `/wake` sends a wake-up without asking anything.
+
+- The machine has to allow it. macOS: System Settings → Energy (or Battery → Options) → "Wake for
+  network access". Linux/Windows: enable Wake-on-LAN in the BIOS and on the network card. Wired
+  Ethernet is the most reliable; Wi-Fi often can't wake a sleeping machine.
+- Docker: a container on a bridge network can't send to `255.255.255.255`. Set `OLLAMA_WOL_ADDR` to
+  your LAN's broadcast address (e.g. `192.168.1.255:9`), or run the container with `network_mode: host`.
+- If Ollama doesn't answer in time, you get the usual "can't reach Ollama" reply.
 
 ## Tools (MCP)
 

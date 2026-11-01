@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 - Long chats are summarized instead of forgotten: messages past `HISTORY_LIMIT` are folded into a
   running summary that is saved with the chat and given to the model. New `/summary` command;
   `HISTORY_SUMMARY` (default `true`) and `SUMMARY_MODEL` settings.
+- Wake-on-LAN: with `OLLAMA_WOL_MAC` set, a message that arrives while the Ollama machine is asleep
+  wakes it and is answered once it's up (`OLLAMA_WOL_ADDR`, `OLLAMA_WOL_WAIT`). New `/wake` command.
 - `/settings` shows the current configuration. MCP tokens are never shown, phone numbers are
   masked and credentials are removed from URLs.
 

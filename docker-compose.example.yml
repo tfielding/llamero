@@ -15,6 +15,8 @@ services:
       # - HISTORY_SUMMARY=true          # summarize older messages instead of dropping them
       # - SUMMARY_MODEL=llama3.2:latest # default: the chat's model
       # - SYSTEM_PROMPT=...
+      # - OLLAMA_WOL_MAC=aa:bb:cc:dd:ee:ff   # wake the Ollama machine when it's asleep
+      # - OLLAMA_WOL_ADDR=192.168.1.255:9    # your LAN's broadcast address
       # - MCP_SERVERS=cams=http://<go2rtc-mcp-host>:8090/mcp   # tools from MCP servers
       # - MCP_TOKEN_CAMS=...                                   # if that server has AUTH_TOKEN set
     volumes:

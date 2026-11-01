@@ -55,6 +55,8 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		return statsText(chat.Last)
 	case "/summary":
 		return b.summaryText(chat.Summary)
+	case "/wake":
+		return b.wakeCommand(ctx)
 	case "/settings":
 		if b.opt.Settings == "" {
 			return "No settings to show."
@@ -111,6 +113,7 @@ const helpText = `Commands:
 /stop - cancel the reply in progress (and anything waiting)
 /stats - speed of the last reply
 /settings - current configuration (secrets hidden)
+/wake - wake the Ollama machine (Wake-on-LAN)
 /help - this message`
 
 // stop cancels the model call in progress for sender and drops queued messages.

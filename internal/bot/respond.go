@@ -56,10 +56,19 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	msgs = append(msgs, chat.History...)
 	msgs = append(msgs, ollama.Message{Role: "user", Content: text})
 
-	// Fail fast with a clear message if Ollama is down (e.g. the machine is asleep).
+	// Fail fast with a clear message if Ollama is down (e.g. the machine is asleep),
+	// or wake it first if Wake-on-LAN is set up.
 	if err := b.llm.Ping(ctx); err != nil {
 		slog.Warn("ollama unreachable", "err", err)
-		return response{text: offlineText}
+		if b.opt.Wake == nil {
+			return response{text: offlineText}
+		}
+		switch err := b.wake(ctx, sender); {
+		case errors.Is(err, errStopped):
+			return response{}
+		case err != nil:
+			return response{text: wakeFailedText}
+		}
 	}
 	info, _ := b.llm.Info(ctx, model)
 	think := b.thinkValue(ctx, model, chat.Think)
@@ -300,6 +309,9 @@ const toolGuidance = "You have tools that can look things up or take actions. " 
 	"Only offer to do things you have a tool for."
 
 const offlineText = "Can't reach Ollama right now. The machine running it may be asleep or offline. Try again in a bit."
+
+const wakeFailedText = "Sent a wake-up, but Ollama didn't come online in time. The machine may be off " +
+	"or not set up for Wake-on-LAN. Try again in a bit, or send /wake."
 
 // unreachable reports whether err means Ollama couldn't be contacted (as opposed to a slow or failed reply).
 func unreachable(err error) bool {

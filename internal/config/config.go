@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/wol"
 )
 
 const defaultSystemPrompt = "You are a helpful assistant chatting over Signal on a phone. " +
@@ -30,6 +32,10 @@ type Config struct {
 	SummaryModel  string          // model that writes summaries; empty = the chat's model
 	SystemPrompt  string
 	OllamaTimeout time.Duration
+
+	WakeMAC  net.HardwareAddr // Ollama machine's MAC for Wake-on-LAN; nil = off
+	WakeAddr string           // where to send the magic packet (host:port)
+	WakeWait time.Duration    // how long to wait for Ollama after a wake-up
 
 	MCPServers    []toolbox.Server // from MCP_SERVERS=name=url,...; MCP_TOKEN_<NAME>, MCP_HINT_<NAME>
 	MCPTools      map[string]bool  // optional allowlist of tool names
@@ -70,6 +76,19 @@ func Load() (Config, error) {
 	}
 	if c.OllamaTimeout, err = time.ParseDuration(env("OLLAMA_TIMEOUT", "5m")); err != nil {
 		return c, fmt.Errorf("OLLAMA_TIMEOUT: %w", err)
+	}
+
+	if v := os.Getenv("OLLAMA_WOL_MAC"); v != "" {
+		if c.WakeMAC, err = wol.ParseMAC(v); err != nil {
+			return c, fmt.Errorf("OLLAMA_WOL_MAC: %w", err)
+		}
+	}
+	c.WakeAddr = env("OLLAMA_WOL_ADDR", wol.DefaultAddr)
+	if _, _, err := net.SplitHostPort(c.WakeAddr); err != nil {
+		return c, fmt.Errorf("OLLAMA_WOL_ADDR must be host:port, e.g. 192.168.1.255:9")
+	}
+	if c.WakeWait, err = time.ParseDuration(env("OLLAMA_WOL_WAIT", "60s")); err != nil || c.WakeWait <= 0 {
+		return c, fmt.Errorf("OLLAMA_WOL_WAIT must be a duration like 60s")
 	}
 
 	if c.MCPServers, err = toolbox.ParseServers(os.Getenv("MCP_SERVERS"), func(kind, name string) string {
@@ -131,6 +150,13 @@ func (c Config) Describe() string {
 	line("OLLAMA_URL", safeURL(c.OllamaURL))
 	line("OLLAMA_MODEL", model)
 	line("OLLAMA_TIMEOUT", c.OllamaTimeout)
+	if c.WakeMAC == nil {
+		line("OLLAMA_WOL_MAC", "not set (Wake-on-LAN off)")
+	} else {
+		line("OLLAMA_WOL_MAC", c.WakeMAC)
+		line("OLLAMA_WOL_ADDR", c.WakeAddr)
+		line("OLLAMA_WOL_WAIT", c.WakeWait)
+	}
 	line("HISTORY_LIMIT", c.HistoryLimit)
 	line("HISTORY_SUMMARY", c.Summarize)
 	line("SUMMARY_MODEL", summaryModel)

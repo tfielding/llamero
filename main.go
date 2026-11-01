@@ -18,6 +18,7 @@ import (
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/wol"
 )
 
 // version is set at build time: -ldflags "-X main.version=v1.2.3".
@@ -71,6 +72,10 @@ func run() error {
 		slog.Info("mcp tools", "servers", len(cfg.MCPServers), "tools", names)
 		tools = box
 	}
+	var wake func(context.Context) error
+	if cfg.WakeMAC != nil {
+		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
+	}
 	b := bot.New(sc, llm, st, bot.Options{
 		Tools:        tools,
 		OwnNumber:    cfg.SignalNumber,
@@ -81,9 +86,11 @@ func run() error {
 		Summarize:    cfg.Summarize,
 		SummaryModel: cfg.SummaryModel,
 		Settings:     cfg.Describe(),
+		Wake:         wake,
+		WakeWait:     cfg.WakeWait,
 	})
 
-	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize)
+	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()
 	if errors.Is(err, context.Canceled) {

@@ -571,3 +571,85 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("settings: %q", r)
 	}
 }
+
+// setupWake makes Ollama start offline and gives the bot a Wake that counts calls.
+// If wakes is true, a wake-up brings Ollama online.
+func setupWake(t *testing.T, wakes bool) (testBot, *fakeMsg, *fakeLLM, *int) {
+	t.Helper()
+	b, m, l, _ := setup(t)
+	l.pingErr = refused
+	sent := new(int)
+	b.opt.Wake = func(context.Context) error {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		*sent++
+		if wakes {
+			l.pingErr = nil
+		}
+		return nil
+	}
+	b.opt.WakeWait, b.opt.WakePoll = 300*time.Millisecond, 5*time.Millisecond
+	return b, m, l, sent
+}
+
+func TestWake(t *testing.T) {
+	b, m, _, sent := setupWake(t, true)
+	b.Handle(dm(me, "hello"))
+	if r := reply(t, m); r != "Ollama is asleep, waking it up…" {
+		t.Fatalf("notice: %q", r)
+	}
+	if r := reply(t, m); r != "echo: hello" {
+		t.Fatalf("after wake: %q", r)
+	}
+	if *sent != 1 {
+		t.Fatalf("wake sent %d times", *sent)
+	}
+
+	b.Handle(dm(me, "/wake"))
+	if r := reply(t, m); r != "Ollama is already awake." {
+		t.Fatalf("/wake when awake: %q", r)
+	}
+}
+
+func TestWakeTimesOut(t *testing.T) {
+	b, m, l, _ := setupWake(t, false)
+	b.Handle(dm(me, "hello"))
+	reply(t, m) // notice
+	if r := reply(t, m); r != wakeFailedText {
+		t.Fatalf("got %q", r)
+	}
+	if l.calls != 0 {
+		t.Fatal("should not call the model when it never woke")
+	}
+
+	b.Handle(dm(me, "/wake"))
+	if r := reply(t, m); !strings.HasPrefix(r, "Wake-up sent.") {
+		t.Fatalf("/wake: %q", r)
+	}
+}
+
+func TestWakeStatusAndStop(t *testing.T) {
+	b, m, _, _ := setupWake(t, false)
+	b.opt.WakeWait = time.Minute
+	b.Handle(dm(me, "hello"))
+	reply(t, m) // notice
+	waitBusy(t, b, me)
+
+	b.Handle(dm(me, "/status"))
+	if r := reply(t, m); !strings.Contains(r, "Now: Ollama waking up for") {
+		t.Fatalf("status: %q", r)
+	}
+	b.Handle(dm(me, "/stop"))
+	if r := reply(t, m); r != "Stopped." {
+		t.Fatalf("stop: %q", r)
+	}
+	expectSilence(t, m) // no "didn't wake" reply after /stop
+}
+
+func TestWakeNotConfigured(t *testing.T) {
+	b, m, _, _ := setup(t)
+	b.Handle(dm(me, "/wake"))
+	if r := reply(t, m); !strings.Contains(r, "isn't set up") {
+		t.Fatalf("got %q", r)
+	}
+}
