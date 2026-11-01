@@ -101,6 +101,12 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 	if !ok {
 		return
 	}
+	// While a tool waits for approval, the next message is the answer. It's checked
+	// before the quote is added: a swipe-reply "yes" to the prompt is still a yes.
+	if b.answer(sender, text) {
+		return
+	}
+	text = withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber)
 	// Read-only commands skip the queue so they answer even mid-reply.
 	if instant(text) {
 		b.workers.Add(1)
@@ -108,10 +114,6 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 			defer b.workers.Done()
 			b.process(ctx, sender, text, 0)
 		}()
-		return
-	}
-	// While a tool waits for approval, the next message is the answer.
-	if b.answer(sender, text) {
 		return
 	}
 	b.mu.Lock()
@@ -157,7 +159,7 @@ func (b *Bot) accept(env signalcli.Envelope) (sender, text string, ok bool) {
 		slog.Info("ignoring message from sender not on allowlist", "from", mask(sender))
 		return "", "", false
 	}
-	return sender, withQuote(text, dm.Quote, b.opt.OwnNumber), true
+	return sender, text, true
 }
 
 // maxQuoteChars caps how much of a quoted message is passed on.

@@ -189,6 +189,21 @@ func (b *Box) Call(ctx context.Context, name string, args map[string]any) (Outpu
 	return out, nil
 }
 
+// Blank reports whether an argument value is empty: nil, a blank string, or an empty list or object.
+func Blank(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(x) == ""
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	}
+	return false
+}
+
 // hasRequired reports whether the input schema lists any required parameters.
 func hasRequired(schema any) bool {
 	raw, err := json.Marshal(schema)
@@ -210,10 +225,10 @@ func hasRequired(schema any) bool {
 func cleanArgs(schema any, args map[string]any) (map[string]any, []string) {
 	clean := map[string]any{}
 	// Blank values are almost always the model filling in optional parameters it
-	// doesn't mean to use ("area": ""), which some servers treat as a filter.
+	// doesn't mean to use ("area": "", "domain": []), which some servers treat as a filter.
 	var blank []string
 	for k, v := range args {
-		if s, ok := v.(string); (ok && strings.TrimSpace(s) == "") || v == nil {
+		if Blank(v) {
 			blank = append(blank, k)
 		}
 	}

@@ -112,17 +112,21 @@ func (b *Bot) awaiting(sender string) bool {
 	return ok
 }
 
-// approvalPrompt shows the call as it will be made: Call removes blank and undeclared
-// arguments, so those are listed separately rather than shown as if they'd be used.
+// approvalPrompt shows the call as it will be made. Call leaves out blank arguments
+// and ones the tool doesn't declare; blank ones are just noise, but a real value being
+// left out can widen an action, so those are listed.
 func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, timeout time.Duration) string {
 	var sb strings.Builder
-	sb.WriteString("Allow this action?\n" + name)
-	clean, dropped := args, []string(nil)
+	fmt.Fprintf(&sb, "Allow %s?", displayName(name))
+	clean, ignored := args, []string(nil)
 	if t, ok := findTool(tools, name); ok {
-		if t.Server() != "" {
-			sb.WriteString(" (" + t.Server() + ")")
-		}
+		var dropped []string
 		clean, dropped = t.CleanArgs(args)
+		for _, k := range dropped {
+			if !toolbox.Blank(args[k]) {
+				ignored = append(ignored, k+": "+argValue(args[k]))
+			}
+		}
 	}
 	keys := make([]string, 0, len(clean))
 	for k := range clean {
@@ -130,27 +134,55 @@ func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, time
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		sb.WriteString("\n  " + k + ": " + argValue(clean[k]))
+		sb.WriteString("\n• " + k + ": " + argValue(clean[k]))
 	}
-	if len(keys) == 0 {
-		sb.WriteString("\n  (no arguments)")
+	if len(ignored) > 0 {
+		sb.WriteString("\n• left out, the tool doesn't take it: " + strings.Join(ignored, "; "))
 	}
-	if len(dropped) > 0 {
-		sb.WriteString("\n  ignored: " + strings.Join(dropped, ", "))
-	}
-	fmt.Fprintf(&sb, "\nReply yes to run it, anything else to cancel. (Expires in %s.)", timeout)
+	fmt.Fprintf(&sb, "\nReply yes to run it, anything else cancels (%s).", shortDuration(timeout))
 	return sb.String()
 }
 
-func argValue(v any) string {
-	if s, ok := v.(string); ok {
-		return s
+// displayName drops a namespace prefix such as "intent__" from a tool name.
+func displayName(name string) string {
+	if i := strings.LastIndex(name, "__"); i >= 0 && i+2 < len(name) {
+		return name[i+2:]
 	}
+	return name
+}
+
+// argValue shows strings as is, lists of strings comma-separated, and anything else as JSON.
+func argValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		parts := make([]string, len(x))
+		for i, e := range x {
+			s, ok := e.(string)
+			if !ok {
+				return jsonValue(v)
+			}
+			parts[i] = s
+		}
+		return strings.Join(parts, ", ")
+	}
+	return jsonValue(v)
+}
+
+func jsonValue(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprint(v)
 	}
 	return string(b)
+}
+
+func shortDuration(d time.Duration) string {
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d min", d/time.Minute)
+	}
+	return d.String()
 }
 
 func approved(reply string) bool {

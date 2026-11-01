@@ -115,13 +115,13 @@ With `MCP_ALLOW_WRITE=ask`, tools that can change things (lights, locks, alarms)
 model, but each call waits for your OK:
 
 ```
-Allow this action?
-HassTurnOff (ha)
-  name: kitchen light
-Reply yes to run it, anything else to cancel. (Expires in 2m0s.)
+Allow HassTurnOff?
+• name: kitchen light
+Reply yes to run it, anything else cancels (2 min).
 ```
 
-- The arguments shown are exactly what will be sent; ones the tool doesn't accept are listed as ignored.
+- The arguments shown are exactly what will be sent. If the model passed a value the tool doesn't
+  take, it's listed as left out, since that can make an action broader than you meant.
 - Reply **yes** (or ok, sure, 👍) to run it. Any other reply cancels it, and the model sees what you
   wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too.
 - Commands still work meanwhile: `/status` shows what's waiting, `/stop` cancels the whole reply.

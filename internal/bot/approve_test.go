@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
 )
 
@@ -63,7 +64,7 @@ func TestApprovalYes(t *testing.T) {
 	b, m, _, ft := setupApproval(t, true)
 	b.Handle(dm(me, "turn off the kitchen light"))
 	ask := reply(t, m)
-	want := "Allow this action?\nturn_off\n  name: kitchen\n  ignored: bogus\nReply yes to run it, anything else to cancel. (Expires in 1m0s.)"
+	want := "Allow turn_off?\n• name: kitchen\n• left out, the tool doesn't take it: bogus: x\nReply yes to run it, anything else cancels (1 min)."
 	if ask != want {
 		t.Fatalf("prompt:\n%s\nwant\n%s", ask, want)
 	}
@@ -165,5 +166,39 @@ func TestApprovalWords(t *testing.T) {
 		if approved(s) {
 			t.Errorf("%q should not approve", s)
 		}
+	}
+}
+
+func TestApprovalPrompt(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{
+		"area": map[string]any{}, "name": map[string]any{}, "domain": map[string]any{}, "device_class": map[string]any{}}}
+	tools := []toolbox.Tool{{Name: "intent__HassTurnOn", Schema: schema}}
+	// What gpt-oss sent to Home Assistant: empty filters and a blank undeclared "floor".
+	args := map[string]any{"area": "Office", "name": "Light", "device_class": []any{}, "domain": []any{}, "floor": ""}
+	want := "Allow HassTurnOn?\n• area: Office\n• name: Light\nReply yes to run it, anything else cancels (2 min)."
+	if got := approvalPrompt(tools, "intent__HassTurnOn", args, 2*time.Minute); got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	args = map[string]any{"name": "Light", "domain": []any{"light", "switch"}, "floor": "Upstairs"}
+	want = "Allow HassTurnOn?\n• domain: light, switch\n• name: Light\n• left out, the tool doesn't take it: floor: Upstairs\n" +
+		"Reply yes to run it, anything else cancels (1m30s)."
+	if got := approvalPrompt(tools, "intent__HassTurnOn", args, 90*time.Second); got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestApprovalSwipeReply(t *testing.T) {
+	b, m, _, ft := setupApproval(t, true)
+	b.Handle(dm(me, "turn off the kitchen light"))
+	ask := reply(t, m)
+	env := dm(me, "Yes")
+	env.DataMessage.Quote = &signalcli.Quote{AuthorNumber: own, Text: ask}
+	b.Handle(env)
+	if r := reply(t, m); r != "echo: turned off" {
+		t.Fatalf("after swipe-reply yes: %q", r)
+	}
+	if ft.called() != 1 {
+		t.Fatalf("calls: %d", ft.called())
 	}
 }
