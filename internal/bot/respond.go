@@ -180,6 +180,16 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 		msgs = append(msgs, ollama.Message{Role: "assistant", Content: res.Content, Thinking: res.Thinking, ToolCalls: res.ToolCalls})
 		for _, tc := range res.ToolCalls {
 			name := tc.Function.Name
+			if b.needsApproval(tools, name) {
+				decline, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments)
+				if err != nil {
+					return "", nil, stats, err
+				}
+				if decline != "" {
+					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: decline})
+					continue
+				}
+			}
 			b.setTool(sender, name)
 			start := time.Now()
 			out, err := b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
@@ -279,7 +289,9 @@ func (b *Bot) typing(ctx context.Context, to string) (stop func()) {
 		t := time.NewTicker(b.opt.TypingRefresh)
 		defer t.Stop()
 		for {
-			if err := b.msg.Typing(ctx, to, true); err != nil {
+			if b.awaiting(to) {
+				// Paused while the user is asked to approve a tool call.
+			} else if err := b.msg.Typing(ctx, to, true); err != nil {
 				slog.Warn("typing indicator failed", "err", err)
 			}
 			select {

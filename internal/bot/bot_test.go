@@ -44,15 +44,17 @@ func (f *fakeMsg) Typing(_ context.Context, _ string, on bool) error {
 }
 
 type fakeLLM struct {
-	mu      sync.Mutex
-	last    []ollama.Message
-	model   string
-	think   any
-	calls   int
-	gate    chan struct{} // if set, Chat blocks until it's closed
-	pingErr error
-	chatErr error
-	failOn  string // if set, Chat fails when any message contains it
+	mu       sync.Mutex
+	last     []ollama.Message
+	model    string
+	think    any
+	calls    int
+	gate     chan struct{} // if set, Chat blocks until it's closed
+	pingErr  error
+	chatErr  error
+	failOn   string           // if set, Chat fails when any message contains it
+	caps     []string         // capabilities reported for models without other metadata
+	toolCall *ollama.ToolCall // if set, the model calls this tool when tools are offered
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -75,6 +77,9 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 	}
 	if chatErr != nil {
 		return ollama.Result{}, chatErr
+	}
+	if f.toolCall != nil && len(tools) > 0 && msgs[len(msgs)-1].Role == "user" {
+		return ollama.Result{ToolCalls: []ollama.ToolCall{*f.toolCall}}, nil
 	}
 	return ollama.Result{
 		Content: "echo: " + msgs[len(msgs)-1].Content,
@@ -101,7 +106,7 @@ func (f *fakeLLM) Info(_ context.Context, model string) (ollama.ModelInfo, error
 	case "gpt-oss:20b":
 		return ollama.ModelInfo{Think: ollama.ThinkInfo{Known: true, Values: []string{"low", "medium", "high"}, Default: "medium"}}, nil
 	}
-	return ollama.ModelInfo{}, nil // no metadata
+	return ollama.ModelInfo{Capabilities: f.caps}, nil // no thinking metadata
 }
 
 // testBot binds a Bot to the test's context so tests can call Handle(env).
@@ -669,7 +674,8 @@ func TestReplyContext(t *testing.T) {
 	}
 
 	send("explain the second part", &signalcli.Quote{AuthorNumber: own, Text: "First part.\nSecond part."})
-	want := "(Replying to your earlier message:\n> First part.\n> Second part.)\n\nexplain the second part"
+	want := "(The user is replying to this message the bot sent earlier, either your reply or the output of a command:\n" +
+		"> First part.\n> Second part.)\n\nexplain the second part"
 	if got := lastUser(); got != want {
 		t.Fatalf("bot quote:\n%q\nwant\n%q", got, want)
 	}
@@ -678,7 +684,7 @@ func TestReplyContext(t *testing.T) {
 	}
 
 	send("and this?", &signalcli.Quote{Author: me, Text: "my question"})
-	if got := lastUser(); !strings.HasPrefix(got, "(Replying to their own earlier message:\n> my question)") {
+	if got := lastUser(); !strings.HasPrefix(got, "(The user is replying to their own earlier message:\n> my question)") {
 		t.Fatalf("own quote: %q", got)
 	}
 

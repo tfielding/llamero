@@ -39,19 +39,21 @@ type Tools interface {
 }
 
 type Options struct {
-	Tools         Tools // nil = no tools
-	OwnNumber     string
-	Allowed       map[string]bool
-	DefaultModel  string
-	SystemPrompt  string
-	HistoryLimit  int
-	Summarize     bool                        // fold messages past HistoryLimit into a running summary instead of dropping them
-	SummaryModel  string                      // model that writes summaries; empty = the chat's model
-	Settings      string                      // shown by /settings, with secrets already hidden
-	Wake          func(context.Context) error // sends Wake-on-LAN to the Ollama machine; nil = off
-	WakeWait      time.Duration               // how long to wait for Ollama after a wake-up
-	WakePoll      time.Duration               // how often to check while waiting
-	TypingRefresh time.Duration               // Signal clients hide the indicator after ~15s
+	Tools           Tools // nil = no tools
+	OwnNumber       string
+	Allowed         map[string]bool
+	DefaultModel    string
+	SystemPrompt    string
+	HistoryLimit    int
+	Summarize       bool                        // fold messages past HistoryLimit into a running summary instead of dropping them
+	SummaryModel    string                      // model that writes summaries; empty = the chat's model
+	Settings        string                      // shown by /settings, with secrets already hidden
+	Wake            func(context.Context) error // sends Wake-on-LAN to the Ollama machine; nil = off
+	WakeWait        time.Duration               // how long to wait for Ollama after a wake-up
+	WakePoll        time.Duration               // how often to check while waiting
+	ConfirmWrites   bool                        // ask the user before running a tool that isn't read-only
+	ApprovalTimeout time.Duration               // how long to wait for that answer
+	TypingRefresh   time.Duration               // Signal clients hide the indicator after ~15s
 }
 
 type Bot struct {
@@ -60,10 +62,11 @@ type Bot struct {
 	store *store.Store
 	opt   Options
 
-	mu      sync.Mutex
-	queues  map[string]chan string // one worker per sender keeps replies in order
-	active  map[string]activity    // model call currently running, per sender
-	workers sync.WaitGroup
+	mu        sync.Mutex
+	queues    map[string]chan string // one worker per sender keeps replies in order
+	approvals map[string]chan string // sender's answer to a pending tool approval
+	active    map[string]activity    // model call currently running, per sender
+	workers   sync.WaitGroup
 }
 
 type activity struct {
@@ -84,8 +87,11 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	if opt.WakePoll == 0 {
 		opt.WakePoll = 2 * time.Second
 	}
+	if opt.ApprovalTimeout == 0 {
+		opt.ApprovalTimeout = 2 * time.Minute
+	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
-		queues: map[string]chan string{}, active: map[string]activity{}}
+		queues: map[string]chan string{}, approvals: map[string]chan string{}, active: map[string]activity{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.
@@ -102,6 +108,10 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 			defer b.workers.Done()
 			b.process(ctx, sender, text, 0)
 		}()
+		return
+	}
+	// While a tool waits for approval, the next message is the answer.
+	if b.answer(sender, text) {
 		return
 	}
 	b.mu.Lock()
@@ -166,11 +176,12 @@ func withQuote(text string, q *signalcli.Quote, own string) string {
 	if r := []rune(quoted); len(r) > maxQuoteChars {
 		quoted = string(r[:maxQuoteChars]) + "…"
 	}
+	// Messages from the bot aren't always the model's: command replies like /models are too.
 	who := "their own earlier message"
 	if own != "" && (q.AuthorNumber == own || q.Author == own) {
-		who = "your earlier message"
+		who = "this message the bot sent earlier, either your reply or the output of a command"
 	}
-	return "(Replying to " + who + ":\n> " + strings.ReplaceAll(quoted, "\n", "\n> ") + ")\n\n" + text
+	return "(The user is replying to " + who + ":\n> " + strings.ReplaceAll(quoted, "\n", "\n> ") + ")\n\n" + text
 }
 
 func (b *Bot) worker(ctx context.Context, sender string, q chan string) {

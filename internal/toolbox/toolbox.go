@@ -327,6 +327,12 @@ func unwrap(s string) string {
 // Server returns the name of the MCP server that provides t.
 func (t Tool) Server() string { return t.server }
 
+// CleanArgs returns args as Call will send them to t: blank values and parameters
+// the schema doesn't declare are removed and listed in dropped.
+func (t Tool) CleanArgs(args map[string]any) (clean map[string]any, dropped []string) {
+	return cleanArgs(t.Schema, args)
+}
+
 // Guidance returns per-server usage notes for the servers behind tools: the instructions
 // each server sent itself, plus any hint from config. Empty if there are none.
 func (b *Box) Guidance(tools []Tool) string {
@@ -463,7 +469,7 @@ func (b *Box) filter(tools []Tool) []Tool {
 			b.hidden[t.server+"/"+t.Name] = true
 			b.mu.Unlock()
 			if first {
-				slog.Info("hiding tool not marked read-only (allow with MCP_TOOLS + MCP_ALLOW_WRITE=true)", "tool", t.Name, "server", t.server)
+				slog.Info("hiding tool not marked read-only (allow with MCP_TOOLS + MCP_ALLOW_WRITE=ask or true)", "tool", t.Name, "server", t.server)
 			}
 			continue
 		}

@@ -40,6 +40,7 @@ type Config struct {
 	MCPServers    []toolbox.Server // from MCP_SERVERS=name=url,...; MCP_TOKEN_<NAME>, MCP_HINT_<NAME>
 	MCPTools      map[string]bool  // optional allowlist of tool names
 	MCPAllowWrite bool             // expose tools not marked read-only
+	MCPConfirm    bool             // ask the user before each call to such a tool (MCP_ALLOW_WRITE=ask)
 	MCPMaxChars   int              // cap on tool output given to the model
 }
 
@@ -105,9 +106,13 @@ func Load() (Config, error) {
 	if c.MCPMaxChars, err = strconv.Atoi(env("MCP_MAX_RESULT_CHARS", strconv.Itoa(toolbox.DefaultMaxResultChars))); err != nil || c.MCPMaxChars < 1000 {
 		return c, fmt.Errorf("MCP_MAX_RESULT_CHARS must be an integer >= 1000")
 	}
-	if v := os.Getenv("MCP_ALLOW_WRITE"); v != "" {
+	switch v := strings.ToLower(os.Getenv("MCP_ALLOW_WRITE")); v {
+	case "":
+	case "ask":
+		c.MCPAllowWrite, c.MCPConfirm = true, true
+	default:
 		if c.MCPAllowWrite, err = strconv.ParseBool(v); err != nil {
-			return c, fmt.Errorf("MCP_ALLOW_WRITE must be true or false")
+			return c, fmt.Errorf("MCP_ALLOW_WRITE must be false, ask or true")
 		}
 	}
 	return c, nil
@@ -190,7 +195,11 @@ func (c Config) Describe() string {
 			tools = strings.Join(names, ", ")
 		}
 		line("MCP_TOOLS", tools)
-		line("MCP_ALLOW_WRITE", c.MCPAllowWrite)
+		allowWrite := fmt.Sprint(c.MCPAllowWrite)
+		if c.MCPConfirm {
+			allowWrite = "ask"
+		}
+		line("MCP_ALLOW_WRITE", allowWrite)
 		line("MCP_MAX_RESULT_CHARS", c.MCPMaxChars)
 	}
 	return strings.TrimSuffix(sb.String(), "\n")

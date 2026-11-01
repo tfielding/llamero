@@ -1,0 +1,169 @@
+package bot
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/signal-ollama/internal/toolbox"
+)
+
+type fakeTools struct {
+	mu    sync.Mutex
+	tools []toolbox.Tool
+	calls []map[string]any
+}
+
+func (f *fakeTools) Tools(context.Context) []toolbox.Tool { return f.tools }
+func (f *fakeTools) Call(_ context.Context, name string, args map[string]any) (toolbox.Output, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, args)
+	return toolbox.Output{Text: "turned off"}, nil
+}
+func (f *fakeTools) Errors() map[string]error       { return nil }
+func (f *fakeTools) Guidance([]toolbox.Tool) string { return "" }
+func (f *fakeTools) called() int                    { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
+
+var lightSchema = map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}}
+
+// setupApproval gives the model a write tool, turn_off, which it calls with
+// {"name": "kitchen", "bogus": "x"} for every message.
+func setupApproval(t *testing.T, confirm bool) (testBot, *fakeMsg, *fakeLLM, *fakeTools) {
+	t.Helper()
+	b, m, l, _ := setup(t)
+	ft := &fakeTools{tools: []toolbox.Tool{
+		{Name: "turn_off", Schema: lightSchema},
+		{Name: "get_state", Schema: lightSchema, ReadOnly: true},
+	}}
+	b.opt.Tools, b.opt.ConfirmWrites, b.opt.ApprovalTimeout = ft, confirm, time.Minute
+	tc := &ollama.ToolCall{}
+	tc.Function.Name = "turn_off"
+	tc.Function.Arguments = map[string]any{"name": "kitchen", "bogus": "x"}
+	l.caps, l.toolCall = []string{"tools"}, tc
+	return b, m, l, ft
+}
+
+// lastTool returns what the model was told about the tool call.
+func lastTool(l *fakeLLM) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.last) - 1; i >= 0; i-- {
+		if l.last[i].Role == "tool" {
+			return l.last[i].Content
+		}
+	}
+	return ""
+}
+
+func TestApprovalYes(t *testing.T) {
+	b, m, _, ft := setupApproval(t, true)
+	b.Handle(dm(me, "turn off the kitchen light"))
+	ask := reply(t, m)
+	want := "Allow this action?\nturn_off\n  name: kitchen\n  ignored: bogus\nReply yes to run it, anything else to cancel. (Expires in 1m0s.)"
+	if ask != want {
+		t.Fatalf("prompt:\n%s\nwant\n%s", ask, want)
+	}
+	if ft.called() != 0 {
+		t.Fatal("ran before approval")
+	}
+
+	b.Handle(dm(me, "/status")) // commands still work and aren't taken as the answer
+	if r := reply(t, m); !strings.Contains(r, "waiting for your OK to run turn_off") {
+		t.Fatalf("status: %q", r)
+	}
+
+	b.Handle(dm(me, "Yes!"))
+	if r := reply(t, m); r != "echo: turned off" {
+		t.Fatalf("after yes: %q", r)
+	}
+	if ft.called() != 1 {
+		t.Fatalf("calls: %d", ft.called())
+	}
+	if b.awaiting(me) {
+		t.Fatal("approval still pending")
+	}
+}
+
+func TestApprovalDeclined(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	b.Handle(dm(me, "turn off the kitchen light"))
+	reply(t, m) // prompt
+	b.Handle(dm(me, "no, the bedroom one"))
+	reply(t, m) // model's answer
+	if ft.called() != 0 {
+		t.Fatal("ran after being declined")
+	}
+	if got := lastTool(l); !strings.Contains(got, "declined") || !strings.Contains(got, `"no, the bedroom one"`) {
+		t.Fatalf("model told: %q", got)
+	}
+	// The answer was consumed: nothing left queued as a new message.
+	expectSilence(t, m)
+}
+
+func TestApprovalTimeout(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	b.opt.ApprovalTimeout = 50 * time.Millisecond
+	b.Handle(dm(me, "turn off the kitchen light"))
+	reply(t, m) // prompt
+	reply(t, m) // model's answer
+	if ft.called() != 0 {
+		t.Fatal("ran without approval")
+	}
+	if got := lastTool(l); !strings.Contains(got, "didn't approve within 50ms") {
+		t.Fatalf("model told: %q", got)
+	}
+}
+
+func TestApprovalStop(t *testing.T) {
+	b, m, _, ft := setupApproval(t, true)
+	b.Handle(dm(me, "turn off the kitchen light"))
+	reply(t, m) // prompt
+	b.Handle(dm(me, "/stop"))
+	if r := reply(t, m); r != "Stopped." {
+		t.Fatalf("stop: %q", r)
+	}
+	expectSilence(t, m)
+	if ft.called() != 0 || b.awaiting(me) {
+		t.Fatal("tool ran or approval still pending after /stop")
+	}
+}
+
+func TestNoApprovalWhenOff(t *testing.T) {
+	b, m, _, ft := setupApproval(t, false) // MCP_ALLOW_WRITE=true
+	b.Handle(dm(me, "turn off the kitchen light"))
+	if r := reply(t, m); r != "echo: turned off" {
+		t.Fatalf("got %q", r)
+	}
+	if ft.called() != 1 {
+		t.Fatal("tool not run")
+	}
+}
+
+func TestReadOnlyToolsNeedNoApproval(t *testing.T) {
+	b, m, l, ft := setupApproval(t, true)
+	l.toolCall.Function.Name = "get_state"
+	b.Handle(dm(me, "is the kitchen light on?"))
+	if r := reply(t, m); r != "echo: turned off" {
+		t.Fatalf("got %q", r)
+	}
+	if ft.called() != 1 {
+		t.Fatal("read-only tool not run")
+	}
+}
+
+func TestApprovalWords(t *testing.T) {
+	for _, s := range []string{"yes", "Y", "ok.", "Sure!", "go ahead", "👍"} {
+		if !approved(s) {
+			t.Errorf("%q should approve", s)
+		}
+	}
+	for _, s := range []string{"no", "yes but the bedroom", "maybe", ""} {
+		if approved(s) {
+			t.Errorf("%q should not approve", s)
+		}
+	}
+}

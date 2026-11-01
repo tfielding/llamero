@@ -68,7 +68,7 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 | `MCP_TOKEN_<NAME>` | none | Bearer token for server `<name>` (uppercased, `-` and `.` become `_`), e.g. `MCP_TOKEN_CAMS` |
 | `MCP_HINT_<NAME>` | none | Optional usage notes for server `<name>`'s tools, added to the model's instructions, e.g. `MCP_HINT_HA=Call GetLiveContext without filters for overviews` |
 | `MCP_TOOLS` | all | Optional allowlist of tool names, e.g. `list_cameras,get_snapshot` |
-| `MCP_ALLOW_WRITE` | `false` | Also expose tools that are not marked read-only |
+| `MCP_ALLOW_WRITE` | `false` | Tools not marked read-only: `false` hides them, `ask` offers them but asks you in Signal before each call, `true` runs them without asking |
 | `MCP_MAX_RESULT_CHARS` | `32000` | Max characters of tool output passed to the model (about 8k tokens). Make sure Ollama's context window can hold it |
 
 ## Run
@@ -109,6 +109,24 @@ model with every message.
 - `/summary` shows what it remembers; `/reset` clears the summary too.
 - `HISTORY_SUMMARY=false` turns this off: older messages are simply dropped.
 
+## Approving actions
+
+With `MCP_ALLOW_WRITE=ask`, tools that can change things (lights, locks, alarms) are offered to the
+model, but each call waits for your OK:
+
+```
+Allow this action?
+HassTurnOff (ha)
+  name: kitchen light
+Reply yes to run it, anything else to cancel. (Expires in 2m0s.)
+```
+
+- The arguments shown are exactly what will be sent; ones the tool doesn't accept are listed as ignored.
+- Reply **yes** (or ok, sure, 👍) to run it. Any other reply cancels it, and the model sees what you
+  wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too.
+- Commands still work meanwhile: `/status` shows what's waiting, `/stop` cancels the whole reply.
+- Read-only tools never ask. Combine with `MCP_TOOLS` to offer only the actions you want.
+
 ## Wake-on-LAN
 
 If the Ollama machine sleeps, set `OLLAMA_WOL_MAC` to its MAC address. When a message arrives and
@@ -129,7 +147,7 @@ signal-ollama can use tools from any [MCP](https://modelcontextprotocol.io) serv
 Streamable HTTP. It has no tool-specific code: point `MCP_SERVERS` at a server and its tools are
 offered to the model.
 
-- Only tools marked **read-only** by the server are offered, unless `MCP_ALLOW_WRITE=true`.
+- Only tools marked **read-only** by the server are offered, unless `MCP_ALLOW_WRITE` is `ask` or `true`.
   Anything that can change things (locks, alarms, settings) stays hidden by default.
 - Tools are only offered to models that support tool calling (Ollama reports this per model).
 - Images returned by a tool are sent to you as Signal attachments with the reply. If the current

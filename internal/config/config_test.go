@@ -96,3 +96,27 @@ func TestWakeOnLAN(t *testing.T) {
 		})
 	}
 }
+
+func TestAllowWrite(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("MCP_SERVERS", "ha=http://ha:9583/mcp")
+	for v, want := range map[string][2]bool{"": {false, false}, "false": {false, false}, "true": {true, false}, "ASK": {true, true}} {
+		t.Setenv("MCP_ALLOW_WRITE", v)
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.MCPAllowWrite != want[0] || c.MCPConfirm != want[1] {
+			t.Errorf("MCP_ALLOW_WRITE=%q: allow %v confirm %v", v, c.MCPAllowWrite, c.MCPConfirm)
+		}
+	}
+	t.Setenv("MCP_ALLOW_WRITE", "ask")
+	if c, _ := Load(); !strings.Contains(c.Describe(), "MCP_ALLOW_WRITE: ask") {
+		t.Error("describe should show ask")
+	}
+	t.Setenv("MCP_ALLOW_WRITE", "maybe")
+	if _, err := Load(); err == nil {
+		t.Error("expected error for MCP_ALLOW_WRITE=maybe")
+	}
+}

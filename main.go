@@ -77,17 +77,18 @@ func run() error {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
 	b := bot.New(sc, llm, st, bot.Options{
-		Tools:        tools,
-		OwnNumber:    cfg.SignalNumber,
-		Allowed:      cfg.Allowed,
-		DefaultModel: cfg.DefaultModel,
-		SystemPrompt: cfg.SystemPrompt,
-		HistoryLimit: cfg.HistoryLimit,
-		Summarize:    cfg.Summarize,
-		SummaryModel: cfg.SummaryModel,
-		Settings:     cfg.Describe(),
-		Wake:         wake,
-		WakeWait:     cfg.WakeWait,
+		Tools:         tools,
+		OwnNumber:     cfg.SignalNumber,
+		Allowed:       cfg.Allowed,
+		DefaultModel:  cfg.DefaultModel,
+		SystemPrompt:  cfg.SystemPrompt,
+		HistoryLimit:  cfg.HistoryLimit,
+		Summarize:     cfg.Summarize,
+		SummaryModel:  cfg.SummaryModel,
+		Settings:      cfg.Describe(),
+		Wake:          wake,
+		WakeWait:      cfg.WakeWait,
+		ConfirmWrites: cfg.MCPConfirm,
 	})
 
 	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
