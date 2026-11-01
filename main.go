@@ -80,6 +80,7 @@ func run() error {
 		HistoryLimit: cfg.HistoryLimit,
 		Summarize:    cfg.Summarize,
 		SummaryModel: cfg.SummaryModel,
+		Settings:     cfg.Describe(),
 	})
 
 	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize)

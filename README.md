@@ -31,7 +31,7 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
   running summary of older ones (see [Long chats](#long-chats))
 - Typing indicator while the model is thinking
 - Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
-- Commands: `/model`, `/model <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/help`
+- Commands: `/models`, `/models <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/help`
 - Messages from one person are answered in order; different people don't block each other
 - Reconnects to Signal automatically
 - Optional tools from MCP servers (e.g. camera snapshots); images that tools return are sent to you as attachments
@@ -52,7 +52,7 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 | `ALLOWED_SENDERS` | required | Comma-separated phone numbers (or Signal UUIDs) |
 | `SIGNAL_URL` | `http://signal-cli-rest-api:8080` | |
 | `OLLAMA_URL` | `http://localhost:11434` | |
-| `OLLAMA_MODEL` | first installed model | Default model; each chat can switch with `/model` |
+| `OLLAMA_MODEL` | first installed model | Default model; each chat can switch with `/models` |
 | `HISTORY_LIMIT` | `40` | Messages kept per chat |
 | `HISTORY_SUMMARY` | `true` | Summarize messages past `HISTORY_LIMIT` instead of dropping them |
 | `SUMMARY_MODEL` | the chat's model | Model that writes summaries, e.g. a small fast one |

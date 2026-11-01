@@ -1,6 +1,6 @@
 package bot
 
-// Slash commands (/status, /model, /stop, ...).
+// Slash commands (/status, /models, /stop, ...).
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 func instant(text string) bool {
 	f := strings.Fields(strings.ToLower(text))
-	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary")
+	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings")
 }
 
 func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text string) string {
@@ -55,7 +55,12 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		return statsText(chat.Last)
 	case "/summary":
 		return b.summaryText(chat.Summary)
-	case "/model":
+	case "/settings":
+		if b.opt.Settings == "" {
+			return "No settings to show."
+		}
+		return "Settings (environment variables):\n" + b.opt.Settings
+	case "/models", "/model": // /model is the old name, still accepted
 		models, err := b.llm.Models(ctx)
 		if err != nil {
 			return "Couldn't list models: " + err.Error()
@@ -70,12 +75,12 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 				}
 				sb.WriteString(mark + m + "\n")
 			}
-			sb.WriteString("\nSwitch with /model <name>")
+			sb.WriteString("\nSwitch with /models <name>")
 			return sb.String()
 		}
 		name, ok := match(models, args[0])
 		if !ok {
-			return fmt.Sprintf("No model named %q. Send /model to see the list.", args[0])
+			return fmt.Sprintf("No model named %q. Send /models to see the list.", args[0])
 		}
 		chat.Model = name
 		if name == b.opt.DefaultModel {
@@ -97,14 +102,15 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 }
 
 const helpText = `Commands:
-/model - list models
-/model <name> - switch model
+/models - list models
+/models <name> - switch model
 /reset - clear conversation memory
 /summary - what it remembers from older messages
 /status - model, memory, and what's running now
 /think - show or change reasoning (on, off, low, medium, high, default)
 /stop - cancel the reply in progress (and anything waiting)
 /stats - speed of the last reply
+/settings - current configuration (secrets hidden)
 /help - this message`
 
 // stop cancels the model call in progress for sender and drops queued messages.

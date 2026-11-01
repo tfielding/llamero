@@ -47,6 +47,7 @@ type Options struct {
 	HistoryLimit  int
 	Summarize     bool          // fold messages past HistoryLimit into a running summary instead of dropping them
 	SummaryModel  string        // model that writes summaries; empty = the chat's model
+	Settings      string        // shown by /settings, with secrets already hidden
 	TypingRefresh time.Duration // Signal clients hide the indicator after ~15s
 }
 

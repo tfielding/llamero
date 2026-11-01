@@ -217,15 +217,15 @@ func TestHistoryPersistsAndTrims(t *testing.T) {
 func TestModelCommands(t *testing.T) {
 	b, m, l, st := setup(t)
 
-	b.Handle(dm(me, "/model"))
+	b.Handle(dm(me, "/models"))
 	if r := reply(t, m); !strings.Contains(r, "* llama3.2:latest") || !strings.Contains(r, "qwen2.5:7b") {
 		t.Fatalf("list: %q", r)
 	}
-	b.Handle(dm(me, "/model nope"))
+	b.Handle(dm(me, "/models nope"))
 	if r := reply(t, m); !strings.Contains(r, "No model") {
 		t.Fatalf("bad model: %q", r)
 	}
-	b.Handle(dm(me, "/model qwen2.5:7b"))
+	b.Handle(dm(me, "/models qwen2.5:7b"))
 	if r := reply(t, m); r != "Switched to qwen2.5:7b." {
 		t.Fatalf("switch: %q", r)
 	}
@@ -237,7 +237,7 @@ func TestModelCommands(t *testing.T) {
 	if c, _ := st.Load(me); c.Model != "qwen2.5:7b" {
 		t.Fatal("model not persisted")
 	}
-	b.Handle(dm(me, "/model llama3.2")) // without tag
+	b.Handle(dm(me, "/model llama3.2")) // old name still works; without tag
 	if r := reply(t, m); r != "Switched to llama3.2:latest." {
 		t.Fatalf("tagless: %q", r)
 	}
@@ -365,7 +365,7 @@ func TestThink(t *testing.T) {
 	if r := send("/think"); !strings.Contains(r, "Thinking: model default") || !strings.Contains(r, "on, off, default") {
 		t.Fatalf("think (unknown): %q", r)
 	}
-	send("/model qwen2.5:7b")
+	send("/models qwen2.5:7b")
 	if r := send("/think"); !strings.Contains(r, "model default (on)") || !strings.Contains(r, "Options for qwen2.5:7b: on, off, default") {
 		t.Fatalf("think (qwen): %q", r)
 	}
@@ -381,7 +381,7 @@ func TestThink(t *testing.T) {
 	}
 
 	// gpt-oss only has levels: switching warns, and the unsupported setting isn't sent.
-	if r := send("/model gpt-oss:20b"); !strings.Contains(r, `doesn't support thinking "off"`) {
+	if r := send("/models gpt-oss:20b"); !strings.Contains(r, `doesn't support thinking "off"`) {
 		t.Fatalf("switch warning: %q", r)
 	}
 	send("hi")
@@ -556,5 +556,18 @@ func TestSplitPoint(t *testing.T) {
 		if got := splitPoint(h[:c.n], c.limit); got != c.want {
 			t.Errorf("splitPoint(%d msgs, limit %d) = %d, want %d", c.n, c.limit, got, c.want)
 		}
+	}
+}
+
+func TestSettings(t *testing.T) {
+	b, m, _, _ := setup(t)
+	b.Handle(dm(me, "/settings"))
+	if r := reply(t, m); r != "No settings to show." {
+		t.Fatalf("empty: %q", r)
+	}
+	b.opt.Settings = "HISTORY_LIMIT: 4"
+	b.Handle(dm(me, "/settings"))
+	if r := reply(t, m); r != "Settings (environment variables):\nHISTORY_LIMIT: 4" {
+		t.Fatalf("settings: %q", r)
 	}
 }

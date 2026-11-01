@@ -3,7 +3,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -97,4 +99,91 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// Describe lists the effective settings by environment variable, for /settings.
+// Secrets are never shown: tokens appear only as "set", phone numbers are masked
+// and credentials in URLs are removed.
+func (c Config) Describe() string {
+	model := c.DefaultModel
+	if os.Getenv("OLLAMA_MODEL") == "" {
+		model += " (first installed model)"
+	}
+	allowed := make([]string, 0, len(c.Allowed))
+	for s := range c.Allowed {
+		allowed = append(allowed, mask(s))
+	}
+	sort.Strings(allowed)
+	prompt := "default"
+	if c.SystemPrompt != defaultSystemPrompt {
+		prompt = fmt.Sprintf("custom (%d characters)", len(c.SystemPrompt))
+	}
+	summaryModel := c.SummaryModel
+	if summaryModel == "" {
+		summaryModel = "the chat's model"
+	}
+
+	var sb strings.Builder
+	line := func(k string, v any) { fmt.Fprintf(&sb, "%s: %v\n", k, v) }
+	line("SIGNAL_URL", safeURL(c.SignalURL))
+	line("SIGNAL_NUMBER", mask(c.SignalNumber))
+	line("ALLOWED_SENDERS", strings.Join(allowed, ", "))
+	line("OLLAMA_URL", safeURL(c.OllamaURL))
+	line("OLLAMA_MODEL", model)
+	line("OLLAMA_TIMEOUT", c.OllamaTimeout)
+	line("HISTORY_LIMIT", c.HistoryLimit)
+	line("HISTORY_SUMMARY", c.Summarize)
+	line("SUMMARY_MODEL", summaryModel)
+	line("SYSTEM_PROMPT", prompt)
+	line("DATA_DIR", c.DataDir)
+	if len(c.MCPServers) == 0 {
+		line("MCP_SERVERS", "none")
+	}
+	for _, s := range c.MCPServers {
+		extra := []string{}
+		if s.Token != "" {
+			extra = append(extra, "token set")
+		}
+		if s.Hint != "" {
+			extra = append(extra, "hint set")
+		}
+		v := s.Name + "=" + safeURL(s.URL)
+		if len(extra) > 0 {
+			v += " (" + strings.Join(extra, ", ") + ")"
+		}
+		line("MCP_SERVERS", v)
+	}
+	if len(c.MCPServers) > 0 {
+		tools := "all"
+		if len(c.MCPTools) > 0 {
+			names := make([]string, 0, len(c.MCPTools))
+			for t := range c.MCPTools {
+				names = append(names, t)
+			}
+			sort.Strings(names)
+			tools = strings.Join(names, ", ")
+		}
+		line("MCP_TOOLS", tools)
+		line("MCP_ALLOW_WRITE", c.MCPAllowWrite)
+		line("MCP_MAX_RESULT_CHARS", c.MCPMaxChars)
+	}
+	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+// mask hides all but the last 4 characters of a phone number or UUID.
+func mask(s string) string {
+	if len(s) <= 4 {
+		return s
+	}
+	return "…" + s[len(s)-4:]
+}
+
+// safeURL drops any user:password from a URL.
+func safeURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "(invalid URL)"
+	}
+	u.User = nil
+	return u.String()
 }

@@ -10,8 +10,11 @@ All notable changes to this project are documented here. The format follows
 - Long chats are summarized instead of forgotten: messages past `HISTORY_LIMIT` are folded into a
   running summary that is saved with the chat and given to the model. New `/summary` command;
   `HISTORY_SUMMARY` (default `true`) and `SUMMARY_MODEL` settings.
+- `/settings` shows the current configuration. MCP tokens are never shown, phone numbers are
+  masked and credentials are removed from URLs.
 
 ### Changed
+- `/model` is now `/models` (`/models` lists, `/models <name>` switches). `/model` still works.
 - Docker `:latest` now points to the newest release. Builds from `main` are published as `:edge`,
   and releases also get a `major.minor` tag (e.g. `:0.1`).
 
