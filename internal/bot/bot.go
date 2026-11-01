@@ -20,6 +20,7 @@ import (
 type Messenger interface {
 	Send(ctx context.Context, recipient, text string, styled bool, attachments []signalcli.Attachment) error
 	Typing(ctx context.Context, recipient string, on bool) error
+	React(ctx context.Context, recipient, targetAuthor string, ts int64, emoji string, remove bool) error
 }
 
 // LLM is the model side (implemented by ollama.Client).
@@ -53,6 +54,7 @@ type Options struct {
 	WakePoll        time.Duration               // how often to check while waiting
 	ConfirmWrites   bool                        // ask the user before running a tool that isn't read-only
 	ApprovalTimeout time.Duration               // how long to wait for that answer
+	Reaction        string                      // emoji shown on a message while it's being answered; empty = off
 	TypingRefresh   time.Duration               // Signal clients hide the indicator after ~15s
 }
 
@@ -63,10 +65,16 @@ type Bot struct {
 	opt   Options
 
 	mu        sync.Mutex
-	queues    map[string]chan string // one worker per sender keeps replies in order
-	approvals map[string]chan string // sender's answer to a pending tool approval
-	active    map[string]activity    // model call currently running, per sender
+	queues    map[string]chan message // one worker per sender keeps replies in order
+	approvals map[string]chan string  // sender's answer to a pending tool approval
+	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
+}
+
+// message is an incoming message waiting to be answered.
+type message struct {
+	text string
+	ts   int64 // Signal timestamp, which identifies the message for reactions
 }
 
 type activity struct {
@@ -91,7 +99,7 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 		opt.ApprovalTimeout = 2 * time.Minute
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
-		queues: map[string]chan string{}, approvals: map[string]chan string{}, active: map[string]activity{}}
+		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.
@@ -106,20 +114,23 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 	if b.answer(sender, text) {
 		return
 	}
-	text = withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber)
+	msg := message{text: withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber), ts: env.DataMessage.Timestamp}
+	if msg.ts == 0 {
+		msg.ts = env.Timestamp
+	}
 	// Read-only commands skip the queue so they answer even mid-reply.
-	if instant(text) {
+	if instant(msg.text) {
 		b.workers.Add(1)
 		go func() {
 			defer b.workers.Done()
-			b.process(ctx, sender, text, 0)
+			b.process(ctx, sender, msg, 0)
 		}()
 		return
 	}
 	b.mu.Lock()
 	q, exists := b.queues[sender]
 	if !exists {
-		q = make(chan string, 16)
+		q = make(chan message, 16)
 		b.queues[sender] = q
 		b.workers.Add(1)
 		go b.worker(ctx, sender, q)
@@ -127,7 +138,7 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 	b.mu.Unlock()
 
 	select {
-	case q <- text:
+	case q <- msg:
 	default:
 		slog.Warn("queue full, dropping message", "sender", sender)
 	}
@@ -186,37 +197,65 @@ func withQuote(text string, q *signalcli.Quote, own string) string {
 	return "(The user is replying to " + who + ":\n> " + strings.ReplaceAll(quoted, "\n", "\n> ") + ")\n\n" + text
 }
 
-func (b *Bot) worker(ctx context.Context, sender string, q chan string) {
+func (b *Bot) worker(ctx context.Context, sender string, q chan message) {
 	defer b.workers.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case text := <-q:
-			b.process(ctx, sender, text, len(q))
+		case msg := <-q:
+			b.process(ctx, sender, msg, len(q))
 		}
 	}
 }
 
 // process answers one message and sends the reply.
-func (b *Bot) process(ctx context.Context, sender, text string, queued int) {
+func (b *Bot) process(ctx context.Context, sender string, msg message, queued int) {
 	start := time.Now()
+	text := msg.text
 	kind := "chat"
 	if strings.HasPrefix(text, "/") {
 		kind = "command"
 	}
 	slog.Info("message received", "from", mask(sender), "kind", kind, "chars", len(text), "queued", queued)
+	unreact := func() {}
+	if kind == "chat" || isRetry(text) {
+		unreact = b.react(ctx, sender, msg.ts)
+	}
 	r := b.respond(ctx, sender, text)
 	if r.text == "" && len(r.images) == 0 {
+		unreact()
 		return
 	}
-	if err := b.send(ctx, sender, r); err != nil {
+	err := b.send(ctx, sender, r)
+	unreact()
+	if err != nil {
 		slog.Error("send failed", "to", mask(sender), "err", err)
 		return
 	}
 	slog.Info("reply sent", "to", mask(sender), "chars", len(r.text), "images", len(r.images), "took", time.Since(start).Round(100*time.Millisecond))
 	if r.summarize {
 		b.summarize(ctx, sender)
+	}
+}
+
+// react shows the reaction emoji on the sender's message while it's being answered,
+// and returns a func that removes it. Failures are logged and otherwise ignored.
+func (b *Bot) react(ctx context.Context, sender string, ts int64) (remove func()) {
+	if b.opt.Reaction == "" || ts == 0 {
+		return func() {}
+	}
+	if err := b.msg.React(ctx, sender, sender, ts, b.opt.Reaction, false); err != nil {
+		slog.Warn("reaction failed", "err", err)
+		return func() {}
+	}
+	return func() {
+		// The reply may have been stopped or the bot be shutting down: use a fresh context.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := b.msg.React(rctx, sender, sender, ts, b.opt.Reaction, true); err != nil {
+			slog.Warn("removing reaction failed", "err", err)
+		}
 	}
 }
 

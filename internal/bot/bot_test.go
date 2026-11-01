@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -21,11 +22,12 @@ const (
 )
 
 type fakeMsg struct {
-	mu     sync.Mutex
-	styled []bool
-	sent   []string
-	typing []bool
-	ch     chan string
+	mu        sync.Mutex
+	styled    []bool
+	sent      []string
+	typing    []bool
+	ch        chan string
+	reactions []string
 }
 
 func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []signalcli.Attachment) error {
@@ -34,6 +36,16 @@ func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []si
 	f.styled = append(f.styled, styled)
 	f.mu.Unlock()
 	f.ch <- text
+	return nil
+}
+func (f *fakeMsg) React(_ context.Context, to, author string, ts int64, emoji string, remove bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	op := "+"
+	if remove {
+		op = "-"
+	}
+	f.reactions = append(f.reactions, fmt.Sprintf("%s%s %d", op, emoji, ts))
 	return nil
 }
 func (f *fakeMsg) Typing(_ context.Context, _ string, on bool) error {
@@ -702,5 +714,85 @@ func TestReplyContext(t *testing.T) {
 
 	if r := send("/stats", &signalcli.Quote{AuthorNumber: own, Text: "something"}); !strings.HasPrefix(r, "Last reply:") {
 		t.Fatalf("command with quote: %q", r)
+	}
+}
+
+func TestReactions(t *testing.T) {
+	b, m, _, _ := setup(t)
+	b.opt.Reaction = "👀"
+	reactions := func() []string {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return append([]string(nil), m.reactions...)
+	}
+	waitReactions := func(n int) []string {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if r := reactions(); len(r) >= n {
+				return r
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("reactions: %v, want %d", reactions(), n)
+		return nil
+	}
+	send := func(text string, ts int64) {
+		env := dm(me, text)
+		env.DataMessage.Timestamp = ts
+		b.Handle(env)
+		reply(t, m)
+	}
+
+	send("hello", 1001)
+	if r := waitReactions(2); strings.Join(r, ",") != "+👀 1001,-👀 1001" {
+		t.Fatalf("chat: %v", r)
+	}
+	send("/status", 1002) // commands answer right away: no reaction
+	send("/retry", 1003)  // runs the model: reaction
+	if r := waitReactions(4); strings.Join(r[2:], ",") != "+👀 1003,-👀 1003" {
+		t.Fatalf("retry: %v", r)
+	}
+	send("no timestamp", 0)
+	expectSilence(t, m)
+	if r := reactions(); len(r) != 4 {
+		t.Fatalf("reacted without a timestamp: %v", r)
+	}
+}
+
+func TestRetry(t *testing.T) {
+	b, m, l, st := setup(t)
+	b.Handle(dm(me, "/retry"))
+	if r := reply(t, m); r != "Nothing to retry yet." {
+		t.Fatalf("empty: %q", r)
+	}
+
+	b.Handle(dm(me, "hi"))
+	reply(t, m)
+	b.Handle(dm(me, "/retry"))
+	if r := reply(t, m); r != "echo: hi" {
+		t.Fatalf("retry: %q", r)
+	}
+	l.mu.Lock()
+	calls, prompt := l.calls, l.last
+	l.mu.Unlock()
+	// The old exchange is not in the prompt, only the question again.
+	if calls != 2 || len(prompt) != 2 || prompt[1].Content != "hi" {
+		t.Fatalf("calls %d, prompt %+v", calls, prompt)
+	}
+	if c, _ := st.Load(me); len(c.History) != 2 || c.History[0].Content != "hi" {
+		t.Fatalf("history: %+v", c.History)
+	}
+
+	// A failed retry keeps the old answer.
+	l.mu.Lock()
+	l.chatErr = errors.New("boom")
+	l.mu.Unlock()
+	b.Handle(dm(me, "/retry"))
+	if r := reply(t, m); !strings.HasPrefix(r, "Model error") {
+		t.Fatalf("failed retry: %q", r)
+	}
+	if c, _ := st.Load(me); len(c.History) != 2 || c.History[1].Content != "echo: hi" {
+		t.Fatalf("history after failed retry: %+v", c.History)
 	}
 }

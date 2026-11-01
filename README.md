@@ -29,10 +29,10 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 
 - Per-chat conversation memory, saved to disk (`DATA_DIR`): the last `HISTORY_LIMIT` messages, plus a
   running summary of older ones (see [Long chats](#long-chats))
-- Typing indicator while the model is thinking
+- Typing indicator while the model is thinking, and a 👀 reaction on your message until the reply is sent
 - Swipe-to-reply works: when you reply to an earlier message, the model sees which one (up to 1000 characters of it)
 - Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
-- Commands: `/models`, `/models <name>`, `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/wake` (wake the Ollama machine), `/help`
+- Commands: `/models`, `/models <name>`, `/retry` (answer your last message again, replacing the previous answer), `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/wake` (wake the Ollama machine), `/help`
 - Messages from one person are answered in order; different people don't block each other
 - Reconnects to Signal automatically
 - Optional tools from MCP servers (e.g. camera snapshots); images that tools return are sent to you as attachments
@@ -60,6 +60,7 @@ use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 | `SUMMARY_MODEL` | the chat's model | Model that writes summaries, e.g. a small fast one |
 | `SYSTEM_PROMPT` | short, phone-friendly assistant prompt | Overrides the built-in prompt (including its formatting rules) |
 | `OLLAMA_TIMEOUT` | `5m` | |
+| `REACTION` | `👀` | Reaction shown on your message while it's being answered. `off` to disable |
 | `OLLAMA_WOL_MAC` | none | MAC address of the Ollama machine. Turns on Wake-on-LAN |
 | `OLLAMA_WOL_ADDR` | `255.255.255.255:9` | Where to send the wake-up. From Docker, use your LAN's broadcast address, e.g. `192.168.1.255:9` |
 | `OLLAMA_WOL_WAIT` | `60s` | How long to wait for Ollama after a wake-up |

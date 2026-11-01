@@ -37,7 +37,16 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 		slog.Error("load history", "err", err)
 		return response{text: "Couldn't load chat history: " + err.Error()}
 	}
-	if strings.HasPrefix(text, "/") {
+	if isRetry(text) {
+		// Answer the last message again. The old answer is only replaced once the new one
+		// is saved, so a failed retry keeps it.
+		n := len(chat.History)
+		if n < 2 || chat.History[n-2].Role != "user" || chat.History[n-1].Role != "assistant" {
+			return response{text: "Nothing to retry yet."}
+		}
+		text = chat.History[n-2].Content
+		chat.History = chat.History[:n-2]
+	} else if strings.HasPrefix(text, "/") {
 		return response{text: b.command(ctx, sender, &chat, text)}
 	}
 

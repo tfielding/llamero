@@ -134,6 +134,18 @@ func (c *Client) Send(ctx context.Context, recipient, text string, styled bool, 
 	return c.do(ctx, http.MethodPost, "/v2/send", body)
 }
 
+// React adds emoji as a reaction to the message targetAuthor sent at ts, in the chat
+// with recipient, or removes it.
+func (c *Client) React(ctx context.Context, recipient, targetAuthor string, ts int64, emoji string, remove bool) error {
+	method := http.MethodPost
+	if remove {
+		method = http.MethodDelete
+	}
+	return c.do(ctx, method, "/v1/reactions/"+url.PathEscape(c.number), map[string]any{
+		"recipient": recipient, "reaction": emoji, "target_author": targetAuthor, "timestamp": ts,
+	})
+}
+
 // Typing starts or stops the typing indicator shown to recipient.
 func (c *Client) Typing(ctx context.Context, recipient string, on bool) error {
 	method := http.MethodPut

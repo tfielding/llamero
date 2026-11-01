@@ -120,3 +120,14 @@ func TestAllowWrite(t *testing.T) {
 		t.Error("expected error for MCP_ALLOW_WRITE=maybe")
 	}
 }
+
+func TestReaction(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	for v, want := range map[string]string{"": "👀", "⏳": "⏳", "off": "", "NONE": ""} {
+		t.Setenv("REACTION", v)
+		if c, _ := Load(); c.Reaction != want {
+			t.Errorf("REACTION=%q: got %q, want %q", v, c.Reaction, want)
+		}
+	}
+}

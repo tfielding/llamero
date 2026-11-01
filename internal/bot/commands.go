@@ -16,6 +16,11 @@ func instant(text string) bool {
 	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings")
 }
 
+func isRetry(text string) bool {
+	f := strings.Fields(strings.ToLower(text))
+	return len(f) > 0 && f[0] == "/retry"
+}
+
 func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text string) string {
 	fields := strings.Fields(text)
 	cmd, args := strings.ToLower(fields[0]), fields[1:]
@@ -106,6 +111,7 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 const helpText = `Commands:
 /models - list models
 /models <name> - switch model
+/retry - answer your last message again
 /reset - clear conversation memory
 /summary - what it remembers from older messages
 /status - model, memory, and what's running now

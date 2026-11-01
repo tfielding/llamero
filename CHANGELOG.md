@@ -18,6 +18,9 @@ All notable changes to this project are documented here. The format follows
   fails and the model retries, the next prompt shows the error.
 - Replies to earlier messages (Signal's swipe-to-reply) pass the quoted text to the model, so
   "explain this part" refers to the right message.
+- A 👀 reaction on your message while it's being answered, removed once the reply is sent
+  (`REACTION` to change the emoji, `off` to disable).
+- `/retry` answers your last message again, replacing the previous answer.
 - `/settings` shows the current configuration. MCP tokens are never shown, phone numbers are
   masked and credentials are removed from URLs.
 

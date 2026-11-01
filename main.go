@@ -89,6 +89,7 @@ func run() error {
 		Wake:          wake,
 		WakeWait:      cfg.WakeWait,
 		ConfirmWrites: cfg.MCPConfirm,
+		Reaction:      cfg.Reaction,
 	})
 
 	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)

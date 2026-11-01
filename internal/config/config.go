@@ -32,6 +32,7 @@ type Config struct {
 	SummaryModel  string          // model that writes summaries; empty = the chat's model
 	SystemPrompt  string
 	OllamaTimeout time.Duration
+	Reaction      string // emoji shown on a message while it's being answered; empty = off
 
 	WakeMAC  net.HardwareAddr // Ollama machine's MAC for Wake-on-LAN; nil = off
 	WakeAddr string           // where to send the magic packet (host:port)
@@ -54,6 +55,11 @@ func Load() (Config, error) {
 		DataDir:      env("DATA_DIR", "/data"),
 		SystemPrompt: env("SYSTEM_PROMPT", defaultSystemPrompt),
 		SummaryModel: os.Getenv("SUMMARY_MODEL"),
+		Reaction:     env("REACTION", "👀"),
+	}
+	switch strings.ToLower(c.Reaction) {
+	case "off", "none", "false":
+		c.Reaction = ""
 	}
 
 	if c.SignalNumber == "" {
@@ -166,6 +172,11 @@ func (c Config) Describe() string {
 	line("HISTORY_SUMMARY", c.Summarize)
 	line("SUMMARY_MODEL", summaryModel)
 	line("SYSTEM_PROMPT", prompt)
+	reaction := c.Reaction
+	if reaction == "" {
+		reaction = "off"
+	}
+	line("REACTION", reaction)
 	line("DATA_DIR", c.DataDir)
 	if len(c.MCPServers) == 0 {
 		line("MCP_SERVERS", "none")
