@@ -4,190 +4,235 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Chat with your own Ollama models over Signal. A small Go service that sits next to
-[bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) and
-answers direct messages from an allowlist of phone numbers.
+[bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) and answers
+direct messages from an allowlist of phone numbers, optionally with tools from MCP servers
+(cameras, Home Assistant, ...).
 
 ```
 Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
-                 ws /v1/receive                          /api/chat
-                 POST /v2/send
+                 ws /v1/receive                     ⇅     /api/chat
+                 POST /v2/send                  MCP servers (optional)
 ```
 
-## What it answers (and what it ignores)
+## Features
+
+- Conversation memory per chat, saved to disk: recent messages word for word, plus a running
+  summary of older ones (see [Long chats](#long-chats))
+- Typing indicator and a 👀 reaction on your message while it's being answered
+- Swipe-to-reply works: the model sees which message you replied to
+- Markdown from the model becomes Signal formatting (bold, italic, monospace); headings become bold
+  lines, tables become label/value lines
+- Tools from MCP servers; pictures they return are sent to you as attachments (see [Tools](#tools-mcp))
+- A [knowledge folder](#knowledge) of notes the model always has: people, routines, how to use each tool
+- Wakes a sleeping Ollama machine with [Wake-on-LAN](#wake-on-lan), or says right away that it's offline
+- Messages from one person are answered in order; different people don't block each other
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/models` | List the installed models, marking the one this chat uses |
+| `/models <name>` | Switch this chat to another model |
+| `/think [setting]` | Show or change reasoning for this chat: `on`, `off`, `low`, `medium`, `high` or `default` (what the model supports) |
+| `/retry` | Answer your last message again, replacing the previous answer (or the one that failed) |
+| `/stop` | Cancel the reply in progress, and any messages waiting behind it |
+| `/reset` | Forget this conversation, including the summary |
+| `/summary` | What it remembers from older messages |
+| `/status` | Model, thinking, memory, knowledge, whether Ollama is online, available tools, what's running now |
+| `/stats` | Speed of the last reply |
+| `/knowledge` | Which notes are loaded from the knowledge folder, and when each is used |
+| `/settings` | The settings in use, with tokens and phone numbers hidden |
+| `/wake` | Wake the Ollama machine (Wake-on-LAN) |
+| `/help` | This list |
+
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge` and `/settings` answer right away, even
+while a reply is being written.
+
+## What it answers
 
 | Message | Behavior |
 |---|---|
-| Direct message from a number in `ALLOWED_SENDERS` | Answered |
+| Direct message from an allowed sender | Answered |
 | Messages in group chats | Ignored |
 | Direct message from anyone else | Ignored (logged) |
 | Messages the account sends itself (alerts, sync messages) | Ignored |
 
-It only reads from the receive websocket and sends direct replies, so other services that
-use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
-
-## Features
-
-- Per-chat conversation memory, saved to disk (`DATA_DIR`): the last `HISTORY_LIMIT` messages, plus a
-  running summary of older ones (see [Long chats](#long-chats))
-- Typing indicator while the model is thinking, and a 👀 reaction on your message until the reply is sent
-- Swipe-to-reply works: when you reply to an earlier message, the model sees which one (up to 1000 characters of it)
-- Markdown from the model is converted to Signal formatting (bold, italic, monospace); headings become bold lines, tables become label/value lines
-- Commands: `/models`, `/models <name>`, `/retry` (answer your last message again, replacing the previous answer), `/reset`, `/summary` (what it remembers from older messages), `/status` (model, thinking, memory, whether Ollama is online, what is running now; answers instantly even mid-reply), `/think` (reasoning on/off or low/medium/high, per chat), `/stop` (cancel the reply in progress and anything waiting), `/stats` (speed of the last reply), `/settings` (current configuration, with tokens and phone numbers hidden), `/knowledge` (which notes are loaded), `/wake` (wake the Ollama machine), `/help`
-- Messages from one person are answered in order; different people don't block each other
-- Reconnects to Signal automatically
-- Optional tools from MCP servers (e.g. camera snapshots); images that tools return are sent to you as attachments
-- A knowledge folder of Markdown notes the model always has (people, cars, routines), plus notes per MCP
-  server; edits apply from the next message (see [Knowledge](#knowledge))
-- If Ollama is unreachable (e.g. the machine is asleep), replies right away saying so instead of waiting for a timeout,
-  or wakes the machine first with Wake-on-LAN (see [Wake-on-LAN](#wake-on-lan))
+It only reads from the receive websocket and sends direct replies, so other services that use the
+same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 
 ## Requirements
 
 - signal-cli-rest-api with `MODE=json-rpc` and a registered number
-- Ollama reachable from the container. If Ollama runs on another machine, make it listen
-  on the network: `OLLAMA_HOST=0.0.0.0` (macOS app: `launchctl setenv OLLAMA_HOST 0.0.0.0`,
-  then restart Ollama).
-
-## Configuration
-
-Settings come from environment variables, from an optional config file, or both:
-
-- **Config file** (optional): `/config/config.yml`, or the path in `CONFIG_FILE`. Copy
-  [`config.example.yml`](config.example.yml) to start. It's the easier way to set up several MCP
-  servers, and the only way to give each server its own `allow_write` and `tools`.
-  `${VAR}` in it is filled in from the environment, so tokens and phone numbers can stay in your
-  `.env`. Inside `{ }` or `[ ]` on one line, put it in quotes: `"${VAR}"`.
-- **Environment variables** win over the file, setting by setting. `MCP_SERVERS` replaces the
-  file's whole server list; `MCP_TOKEN_<NAME>` replaces one server's token.
-- **Checked at startup:** a missing required setting, an invalid value, an unknown key in the file
-  (e.g. a typo), a `${VAR}` that isn't set, or a `CONFIG_FILE` that doesn't exist stops
-  signal-ollama with a message naming the setting (and its line in the file). The file is read
-  once at startup; restart to apply changes. (The [knowledge folder](#knowledge) is different: it's
-  read again whenever it changes.)
-- `/settings` shows the effective settings and which config file was read.
-
-| Variable | config.yml | Default | |
-|---|---|---|---|
-| `SIGNAL_NUMBER` | `signal.number` | required | The number registered in signal-cli-rest-api |
-| `ALLOWED_SENDERS` | `signal.allowed_senders` | required | Comma-separated phone numbers (or Signal UUIDs) |
-| `SIGNAL_URL` | `signal.url` | `http://signal-cli-rest-api:8080` | |
-| `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
-| `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
-| `HISTORY_LIMIT` | `history.limit` | `40` | Messages kept per chat |
-| `HISTORY_SUMMARY` | `history.summary` | `true` | Summarize messages past `HISTORY_LIMIT` instead of dropping them |
-| `SUMMARY_MODEL` | `history.summary_model` | the chat's model | Model that writes summaries, e.g. a small fast one |
-| `SYSTEM_PROMPT` | `system_prompt` | short, phone-friendly assistant prompt | Overrides the built-in prompt (including its formatting rules) |
-| `OLLAMA_TIMEOUT` | `ollama.timeout` | `5m` | |
-| `REACTION` | `reaction` | `👀` | Reaction shown on your message while it's being answered. `off` to disable |
-| `OLLAMA_WOL_MAC` | `ollama.wake_on_lan.mac` | none | MAC address of the Ollama machine. Turns on Wake-on-LAN |
-| `OLLAMA_WOL_ADDR` | `ollama.wake_on_lan.addr` | `255.255.255.255:9` | Where to send the wake-up. From Docker, use your LAN's broadcast address, e.g. `192.168.1.255:9` |
-| `OLLAMA_WOL_WAIT` | `ollama.wake_on_lan.wait` | `60s` | How long to wait for Ollama after a wake-up |
-| `CONFIG_FILE` | | `/config/config.yml` | Config file to read. If set, the file must exist; if not set, a missing default file is fine |
-| `DATA_DIR` | `data_dir` | `/data` | Chat history (one JSON file per chat) |
-| `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of Markdown notes for the model (see [Knowledge](#knowledge)). Missing folder = no notes |
-| `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every request (about 2k tokens) |
-| `MCP_SERVERS` | `mcp.servers.&lt;name&gt;.url` | none | MCP servers to get tools from: `name=url,...`, e.g. `cams=http://go2rtc-mcp:8090/mcp` |
-| `MCP_TOKEN_<NAME>` | `mcp.servers.&lt;name&gt;.token` | none | Bearer token for server `<name>` (uppercased, `-` and `.` become `_`), e.g. `MCP_TOKEN_CAMS` |
-| `MCP_TOOLS` | `mcp.tools` | all | Optional allowlist of tool names, e.g. `list_cameras,get_snapshot` |
-| `MCP_ALLOW_WRITE` | `mcp.allow_write` | `false` | Tools not marked read-only: `false` hides them, `ask` offers them but asks you in Signal before each call, `true` runs them without asking. In the file, each server can set its own (`mcp.servers.<name>.allow_write`) |
-| | `mcp.servers.<name>.allow_write` | `mcp.allow_write` | Per server: `false`, `ask` or `true` |
-| | `mcp.servers.<name>.tools` | all | Per server: only these of its tools (names as the server gives them) |
-| | `mcp.servers.<name>.knowledge` | `<name>.md` if it exists | Per server: notes file in the [knowledge folder](#knowledge) for its tools. Must exist |
-| `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output passed to the model (about 8k tokens). Make sure Ollama's context window can hold it |
+- Ollama reachable from the container. If Ollama runs on another machine, make it listen on the
+  network: `OLLAMA_HOST=0.0.0.0` (macOS app: `launchctl setenv OLLAMA_HOST 0.0.0.0`, then restart
+  Ollama).
 
 ## Run
 
-With Docker Compose, add the service from `docker-compose.example.yml` next to your
-existing `signal-cli-rest-api` service (use `image: ghcr.io/tfielding/signal-ollama:latest`
-or `build:`). Like Frigate, it uses two folders: `/config` for what you write (the knowledge
-notes; mounted read-only) and `/data` for what the bot writes (chat history). The image runs as a
-non-root user (uid 65532), so create them first:
+Like Frigate, signal-ollama uses two folders: `config` for what you write (mounted read-only) and
+`data` for what the bot writes.
+
+```
+/opt/signal-ollama/
+├── config/                 yours; the bot only reads it
+│   ├── config.yml          settings (optional, see Configuration)
+│   └── knowledge/          notes for the model (optional, see Knowledge)
+└── data/                   chat history, one file per chat; owned by the bot
+```
+
+The image runs as a non-root user (uid 65532) that needs to write to `data`:
 
 ```bash
 sudo mkdir -p /opt/signal-ollama/config/knowledge /opt/signal-ollama/data
 sudo chown 65532:65532 /opt/signal-ollama/data
+```
+
+Add the service next to your existing `signal-cli-rest-api` service, so they share a Docker network
+(see also [`docker-compose.example.yml`](docker-compose.example.yml)):
+
+```yaml
+  signal-ollama:
+    image: ghcr.io/tfielding/signal-ollama:latest
+    restart: always
+    environment:                # values for the ${...} in config.yml, from your .env
+      - SIGNAL_NUMBER=${SIGNAL_NUMBER}
+      - ALLOWED_SENDERS=${ALLOWED_SENDERS}
+    volumes:
+      - /opt/signal-ollama/config:/config:ro
+      - /opt/signal-ollama/data:/data
+    depends_on:
+      - signal-cli-rest-api
+```
+
+```bash
 docker compose up -d signal-ollama
 ```
 
-Notes in `config/knowledge` only need to be readable by everyone (the default for files you create).
+Then send `/status` from your phone. If it doesn't start, `docker logs signal-ollama` names the
+setting that's wrong.
 
-Use `SIGNAL_URL=http://signal-cli-rest-api:8080` (the service name), not `localhost`:
-inside a container, `localhost` is the container itself.
+- Use `http://signal-cli-rest-api:8080` (the service name) for Signal, not `localhost`: inside a
+  container, `localhost` is the container itself.
+- The typing indicator only shows if "Typing indicators" is on in your Signal app
+  (Settings → Privacy).
 
-The typing indicator only shows if "Typing indicators" is on in your Signal app
-(Settings → Privacy).
-
-Locally:
+Locally, without Docker:
 
 ```bash
 SIGNAL_URL=http://<signal-host>:8080 SIGNAL_NUMBER=+1... ALLOWED_SENDERS=+1... \
 OLLAMA_URL=http://localhost:11434 DATA_DIR=./data go run .
 ```
 
-## Knowledge
+## Configuration
 
-Put Markdown files in the knowledge folder (`/opt/signal-ollama/config/knowledge` with the compose
-example) to tell the model things it can't look up:
+Settings come from an optional config file, environment variables, or both.
 
-```
-config/knowledge/
-  home.md      always given: people, cars, routines, preferences
-  ha.md        given with the Home Assistant tools
-  frigate.md   given with the frigate tools
-```
-
-- A server's notes file is named in `config.yml` with `knowledge:`, and must exist (checked at
-  startup):
+- **Config file:** `/config/config.yml`, or the path in `CONFIG_FILE`. Copy
+  [`config.example.yml`](config.example.yml) to start:
 
   ```yaml
+  signal:
+    number: ${SIGNAL_NUMBER}
+    allowed_senders: ${ALLOWED_SENDERS}
+  ollama:
+    url: http://192.168.1.50:11434
+    model: llama3.2:latest
   mcp:
     servers:
+      cams:
+        url: http://go2rtc-mcp:8090/mcp
       ha:
         url: http://homeassistant:8123/api/mcp
+        token: ${HA_TOKEN}
+        allow_write: ask
         knowledge: ha.md
   ```
 
-  Without `knowledge:` (or with `MCP_SERVERS`), the file named after the server is used if it's
-  there: `frigate.md` for the server `frigate`. Several servers can name the same file.
-- A server's notes are added to its tool notes, and only when its tools are offered.
-- Every other `.md` file (not used by any server) is always given to the model, in name order,
-  after the system prompt.
-- Files are read again when they change: edits apply from the next message, no restart.
-- Everything here is sent with every message, so keep it short: small models have small context
-  windows, and long notes push out chat history. The total is capped at `KNOWLEDGE_MAX_CHARS`
-  (general notes first, then per-server ones); anything past it is cut off and logged.
-- `/knowledge` lists the files, their size and when each is used. `/status` shows the total.
-- The notes only go to your Ollama server.
+  `${VAR}` is filled in from the container's environment, so secrets can stay in your `.env`
+  (pass them in with `environment:`). Inside `{ }` or `[ ]` on one line, quote it: `"${VAR}"`.
+- **Environment variables** win over the file, setting by setting. `MCP_SERVERS` replaces the
+  file's whole server list.
+- **Checked at startup:** a missing required setting, an invalid value, an unknown key (e.g. a
+  typo), an unset `${VAR}` or a missing knowledge file stops signal-ollama with a message naming
+  the setting and its line. The file is read once; restart to apply changes.
+
+| Variable | config.yml | Default | |
+|---|---|---|---|
+| `SIGNAL_NUMBER` | `signal.number` | required | The number registered in signal-cli-rest-api |
+| `ALLOWED_SENDERS` | `signal.allowed_senders` | required | Phone numbers (or Signal UUIDs) allowed to use the bot; comma-separated, or a list in the file |
+| `SIGNAL_URL` | `signal.url` | `http://signal-cli-rest-api:8080` | |
+| `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
+| `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
+| `OLLAMA_TIMEOUT` | `ollama.timeout` | `5m` | |
+| `OLLAMA_WOL_MAC` | `ollama.wake_on_lan.mac` | none | MAC address of the Ollama machine; turns on [Wake-on-LAN](#wake-on-lan) |
+| `OLLAMA_WOL_ADDR` | `ollama.wake_on_lan.addr` | `255.255.255.255:9` | Where to send the wake-up. From Docker, your LAN's broadcast address, e.g. `192.168.1.255:9` |
+| `OLLAMA_WOL_WAIT` | `ollama.wake_on_lan.wait` | `60s` | How long to wait for Ollama after a wake-up |
+| `HISTORY_LIMIT` | `history.limit` | `40` | Messages kept word for word per chat |
+| `HISTORY_SUMMARY` | `history.summary` | `true` | Summarize older messages instead of dropping them |
+| `SUMMARY_MODEL` | `history.summary_model` | the chat's model | Model that writes summaries, e.g. a small fast one |
+| `SYSTEM_PROMPT` | `system_prompt` | short, phone-friendly prompt | Replaces the built-in prompt, including its formatting rules |
+| `REACTION` | `reaction` | `👀` | Reaction on your message while it's answered; `off` to disable |
+| `MCP_SERVERS` | `mcp.servers.<name>.url` | none | MCP servers to get tools from. Env: `name=url,...`, e.g. `cams=http://go2rtc-mcp:8090/mcp` |
+| `MCP_TOKEN_<NAME>` | `mcp.servers.<name>.token` | none | Bearer token for a server. Env name is uppercased, `-` and `.` become `_`, e.g. `MCP_TOKEN_HA` |
+| `MCP_ALLOW_WRITE` | `mcp.allow_write` | `false` | Tools that can change things: `false` hides them, `ask` asks you before each call, `true` runs them. The default for servers without their own |
+| | `mcp.servers.<name>.allow_write` | `mcp.allow_write` | The same, for one server |
+| | `mcp.servers.<name>.tools` | all | Only these of the server's tools |
+| | `mcp.servers.<name>.knowledge` | `<name>.md` if present | The server's notes file in the [knowledge folder](#knowledge); must exist |
+| `MCP_TOOLS` | `mcp.tools` | all | Only these tools, across all servers |
+| `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
+| `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
+| `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
+| `DATA_DIR` | `data_dir` | `/data` | Chat history |
+| `CONFIG_FILE` | | `/config/config.yml` | Config file to read. If set, it must exist; the default may be missing |
+
+## Knowledge
+
+Markdown files in the knowledge folder tell the model things it can't look up:
+
+```
+config/knowledge/
+  home.md      always given: people, routines, preferences
+  ha.md        given with the Home Assistant tools (knowledge: ha.md in config.yml)
+  frigate.md   given with the frigate tools
+```
+
+- **Per server:** a server's file is named with `knowledge:` in `config.yml`. Without it, the file
+  named after the server is used if present (`frigate.md` for `frigate`). It's given only when that
+  server's tools are offered. Several servers can share a file.
+- **Everything else** in the folder is given with every message, after the system prompt.
+- **Edits apply from the next message,** no restart. A missing folder just means no notes.
+- **Keep it short:** it's sent with every message, and small models have small context windows.
+  The total is capped at `KNOWLEDGE_MAX_CHARS`; anything past it is cut off and logged.
 
 Example `home.md`:
 
 ```markdown
-## Home
-- People: Alex and Jordan. Our car: blue hatchback (plate XYZ 789).
+- People: Alex and Jordan. Our car: blue hatchback.
 - Deliveries usually come to the porch between 10:00 and 16:00.
-
-## Cameras
-- driveway faces the street; cars passing on the road aren't visitors.
+- The driveway camera faces the street; cars passing on the road aren't visitors.
 ```
 
-## Long chats
+## Tools (MCP)
 
-Each chat keeps its last `HISTORY_LIMIT` messages word for word. When a chat goes past that, the
-older messages are summarized by the model and dropped; the newest half of the limit is kept. The
-summary is updated the same way each time, saved in the chat's file in `DATA_DIR`, and given to the
-model with every message.
+signal-ollama can use tools from any [MCP](https://modelcontextprotocol.io) server that speaks
+Streamable HTTP, such as [frigate-mcp](https://github.com/tfielding/frigate-mcp),
+[go2rtc-mcp](https://github.com/tfielding/go2rtc-mcp) or Home Assistant's. It has no
+tool-specific code: list a server and its tools are offered to the model.
 
-- Summaries are written after the reply is sent, so they never delay an answer. A message sent in
-  the meantime waits until the summary is done; `/status` shows "updating memory" and `/stop` cancels it.
-- If a summary fails (Ollama offline, error), the messages are kept and it's tried again after the
-  next reply. If it keeps failing, the oldest messages are dropped at twice `HISTORY_LIMIT`.
-- `/summary` shows what it remembers; `/reset` clears the summary too.
-- `HISTORY_SUMMARY=false` turns this off: older messages are simply dropped.
+- Only tools marked **read-only** are offered, unless the server's `allow_write` is `ask` or
+  `true`. Anything that can change things (locks, alarms, settings) stays hidden by default.
+- Tools are only offered to models that support tool calling (Ollama reports this per model).
+- Pictures a tool returns are sent to you with the reply. A vision model sees them too.
+- Each server's notes reach the model with its tools: what the server sends itself (MCP
+  "instructions"), plus its [knowledge](#knowledge) file.
+- Up to 6 rounds of tool calls per message. A read-only call that fails because of optional
+  arguments the model guessed is retried once without them.
+- `/status` lists the tools and any unreachable server. Lists refresh every minute, and sessions
+  reconnect if a server restarts.
 
-## Approving actions
+### Approving actions
 
-With `MCP_ALLOW_WRITE=ask`, tools that can change things (lights, locks, alarms) are offered to the
-model, but each call waits for your OK:
+With `allow_write: ask`, each call to a tool that can change things waits for your OK:
 
 ```
 Allow switch_off?
@@ -195,58 +240,53 @@ Allow switch_off?
 Reply yes to run it, anything else cancels (2 min).
 ```
 
-- The arguments shown are exactly what will be sent. If the model passed a value the tool doesn't
-  take, it's listed as left out, since that can make an action broader than you meant.
+- The arguments shown are exactly what will be sent; any the tool doesn't take are listed as left
+  out.
 - Reply **yes** (or ok, sure, 👍) to run it. Any other reply cancels it, and the model sees what you
-  wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it too. After a
-  timeout or a second "no", the model doesn't try any more actions for that message.
-- Commands still work meanwhile: `/status` shows what's waiting, `/stop` cancels the whole reply.
-- If an approved call fails and the model tries again, the next prompt starts with
-  "The last try failed: …" so you can see why.
-- Read-only tools never ask. Combine with `MCP_TOOLS` to offer only the actions you want.
+  wrote, so "no, the bedroom one" works. No answer within 2 minutes cancels it.
+- After a timeout or a second "no", the model doesn't try more actions for that message.
+- If an approved call fails and the model retries, the next prompt says why the last try failed.
+- `/status` shows what's waiting; `/stop` cancels the whole reply.
+
+## Long chats
+
+Each chat keeps its last `HISTORY_LIMIT` messages word for word. Past that, the older messages are
+summarized by the model and dropped, keeping the newest half. The summary is saved with the chat
+and given to the model with every message.
+
+- Summaries are written after a reply is sent, so they never delay one. A message sent meanwhile
+  waits; `/status` shows "updating memory" and `/stop` cancels it.
+- If a summary fails, the messages are kept and it's tried again after the next reply. If it keeps
+  failing, the oldest are dropped at twice `HISTORY_LIMIT`.
+- `HISTORY_SUMMARY=false` turns this off: older messages are simply dropped.
 
 ## Wake-on-LAN
 
-If the Ollama machine sleeps, set `OLLAMA_WOL_MAC` to its MAC address. When a message arrives and
-Ollama is unreachable, the bot sends a wake-up (a Wake-on-LAN magic packet), replies "Ollama is
-asleep, waking it up…", waits up to `OLLAMA_WOL_WAIT` for Ollama to answer, then replies as usual.
-`/status` shows the wait and `/stop` cancels it. `/wake` sends a wake-up without asking anything.
+With `OLLAMA_WOL_MAC` set, a message that arrives while Ollama is unreachable sends a wake-up to
+its machine. The bot replies "Ollama is asleep, waking it up…", waits up to `OLLAMA_WOL_WAIT`, then
+answers as usual. `/stop` cancels the wait; `/wake` sends a wake-up on demand.
 
 - The machine has to allow it. macOS: System Settings → Energy (or Battery → Options) → "Wake for
   network access". Linux/Windows: enable Wake-on-LAN in the BIOS and on the network card. Wired
-  Ethernet is the most reliable; Wi-Fi often can't wake a sleeping machine.
-- Docker: a container on a bridge network can't send to `255.255.255.255`. Set `OLLAMA_WOL_ADDR` to
-  your LAN's broadcast address (e.g. `192.168.1.255:9`), or run the container with `network_mode: host`.
-- If Ollama doesn't answer in time, you get the usual "can't reach Ollama" reply.
-- If `OLLAMA_MODEL` isn't set, the bot needs Ollama at startup to pick a model; it sends a wake-up
-  then too (and every 5 minutes while it waits).
+  Ethernet is the most reliable.
+- From Docker on a bridge network, set `OLLAMA_WOL_ADDR` to your LAN's broadcast address (e.g.
+  `192.168.1.255:9`), or use `network_mode: host`.
+- Without `OLLAMA_MODEL`, the bot needs Ollama at startup to pick a model; it sends a wake-up then
+  too, and every 5 minutes while it waits.
 
-## Tools (MCP)
+## Safety
 
-signal-ollama can use tools from any [MCP](https://modelcontextprotocol.io) server that speaks
-Streamable HTTP. It has no tool-specific code: point `MCP_SERVERS` at a server and its tools are
-offered to the model.
-
-- Only tools marked **read-only** by the server are offered, unless `MCP_ALLOW_WRITE` is `ask` or `true`.
-  Anything that can change things (locks, alarms, settings) stays hidden by default.
-- Tools are only offered to models that support tool calling (Ollama reports this per model).
-- Images returned by a tool are sent to you as Signal attachments with the reply. If the current
-  model supports vision, it sees them too; otherwise it's told an image was sent.
-- The model can make up to 6 rounds of tool calls per message. `/stop` cancels tool calls too.
-- Usage notes are added to the model's instructions per server: whatever the server itself sends
-  when the bot connects (MCP "instructions"), plus `<name>.md` from the
-  [knowledge folder](#knowledge). Tool-specific advice belongs there, not in the code.
-- If a read-only tool call fails because of optional parameters the model guessed, it is retried
-  once without them. Tools that can change things are never retried this way.
-- `/status` lists the available tools and any server that's unreachable. Tool lists are refreshed
-  every minute, and sessions reconnect automatically if a server restarts.
-
-## Notes
-
-- signal-cli-rest-api has no authentication. Keep port 8080 off the internet; ideally don't
+- **Allowlist only.** Only `ALLOWED_SENDERS` get answers; group chats are ignored.
+- **Read-only tools by default.** Tools that can change things are hidden unless a server allows
+  them, and with `ask` each call needs your approval.
+- **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
+  removes credentials from URLs.
+- **Local only.** Chats and knowledge notes only go to your Ollama server. Chat history is stored
+  unencrypted in `data`.
+- Runs as a non-root user in a minimal image with no shell.
+- signal-cli-rest-api has no authentication. Keep its port 8080 off the internet; ideally don't
   publish it at all and let containers talk over the Docker network.
 - In json-rpc mode, messages that arrive while signal-ollama is down are not replayed.
-- Chat history is stored unencrypted in `DATA_DIR`.
 
 ## Install without Docker
 
