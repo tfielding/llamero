@@ -12,6 +12,7 @@ import (
 	"github.com/tfielding/signal-ollama/internal/format"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/signal-ollama/internal/schedule"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
@@ -43,6 +44,9 @@ type Tools interface {
 type Options struct {
 	Tools           Tools           // nil = no tools
 	Knowledge       *knowledge.Base // notes from the knowledge folder; nil = none
+	Schedules       *schedule.Store // scheduled checks; nil = off
+	Location        *time.Location  // time zone for schedules; nil = time.Local
+	ScheduleTick    time.Duration   // how often to look for due schedules (default 15s)
 	OwnNumber       string
 	Allowed         map[string]bool
 	DefaultModel    string
@@ -67,15 +71,17 @@ type Bot struct {
 
 	mu        sync.Mutex
 	queues    map[string]chan message // one worker per sender keeps replies in order
+	scheduled map[string]bool         // scheduled runs waiting or running, by "chat#id"
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
 }
 
-// message is an incoming message waiting to be answered.
+// message is an incoming message waiting to be answered, or a scheduled check to run.
 type message struct {
-	text string
-	ts   int64 // Signal timestamp, which identifies the message for reactions
+	text     string
+	ts       int64 // Signal timestamp, which identifies the message for reactions
+	schedule int   // if set, run this schedule instead of answering text
 }
 
 type activity struct {
@@ -100,7 +106,8 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 		opt.ApprovalTimeout = 2 * time.Minute
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
-		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{}}
+		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
+		scheduled: map[string]bool{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.
@@ -128,6 +135,12 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 		}()
 		return
 	}
+	b.enqueue(ctx, sender, msg)
+}
+
+// enqueue adds msg to sender's queue, starting its worker if needed. Messages from one
+// sender are handled in order. It reports false if the queue is full.
+func (b *Bot) enqueue(ctx context.Context, sender string, msg message) bool {
 	b.mu.Lock()
 	q, exists := b.queues[sender]
 	if !exists {
@@ -140,8 +153,10 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 
 	select {
 	case q <- msg:
+		return true
 	default:
-		slog.Warn("queue full, dropping message", "sender", sender)
+		slog.Warn("queue full, dropping message", "sender", mask(sender))
+		return false
 	}
 }
 
@@ -212,6 +227,10 @@ func (b *Bot) worker(ctx context.Context, sender string, q chan message) {
 
 // process answers one message and sends the reply.
 func (b *Bot) process(ctx context.Context, sender string, msg message, queued int) {
+	if msg.schedule != 0 {
+		b.runSchedule(ctx, sender, msg.schedule)
+		return
+	}
 	start := time.Now()
 	text := msg.text
 	kind := "chat"

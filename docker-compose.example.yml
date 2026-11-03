@@ -8,6 +8,7 @@ services:
     # Settings can go here as environment variables, or in /opt/signal-ollama/config/config.yml
     # (see config.example.yml), or both; environment variables win.
     environment:
+      - TZ=America/New_York             # your time zone, for scheduled checks
       - SIGNAL_URL=http://signal-cli-rest-api:8080
       - SIGNAL_NUMBER=+1XXXXXXXXXX      # number already registered in signal-cli-rest-api
       - ALLOWED_SENDERS=+1YYYYYYYYYY    # your phone; comma-separate to add more

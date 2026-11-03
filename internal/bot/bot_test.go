@@ -68,12 +68,19 @@ type fakeLLM struct {
 	caps     []string         // capabilities reported for models without other metadata
 	toolCall *ollama.ToolCall // if set, the model calls this tool when tools are offered
 	retry    bool             // and calls it again after any tool result (an error or a decline)
+	answer   string           // if set, the final answer instead of an echo
+	offered  []string         // tool names offered in the last call
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
 	f.mu.Lock()
 	f.last, f.model, f.think = msgs, model, think
 	f.calls++
+	f.offered = nil
+	for _, t := range tools {
+		f.offered = append(f.offered, t.Function.Name)
+	}
+	answer := f.answer
 	gate, chatErr := f.gate, f.chatErr
 	for _, m := range msgs {
 		if f.failOn != "" && strings.Contains(m.Content, f.failOn) {
@@ -95,8 +102,12 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 	if f.toolCall != nil && len(tools) > 0 && (last.Role == "user" || (f.retry && last.Role == "tool")) {
 		return ollama.Result{ToolCalls: []ollama.ToolCall{*f.toolCall}}, nil
 	}
+	content := "echo: " + msgs[len(msgs)-1].Content
+	if answer != "" {
+		content = answer
+	}
 	return ollama.Result{
-		Content: "echo: " + msgs[len(msgs)-1].Content,
+		Content: content,
 		Stats:   ollama.Stats{EvalCount: 100, EvalDuration: 2 * time.Second, PromptEvalCount: 50, PromptEvalDuration: 500 * time.Millisecond, TotalDuration: 3 * time.Second},
 	}, nil
 }
@@ -828,5 +839,32 @@ func TestWakeSendFails(t *testing.T) {
 	b.Handle(dm(me, "hello"))
 	if r := reply(t, m); r != offlineText {
 		t.Fatalf("got %q", r)
+	}
+}
+
+func TestImageNotesStayOutOfReplies(t *testing.T) {
+	history := []ollama.Message{
+		{Role: "user", Content: "show me the driveway"},
+		{Role: "assistant", Content: "Here it is.\n\n[2 image(s) were sent to the user with this reply.]"},
+		{Role: "user", Content: "thanks"},
+		{Role: "assistant", Content: "You're welcome."},
+	}
+	got := forPrompt(history)
+	if len(got) != 5 || got[1].Content != "Here it is." || got[2].Role != "system" ||
+		got[2].Content != "(That reply also sent 2 image(s) to the user.)" || got[4].Content != "You're welcome." {
+		t.Fatalf("%+v", got)
+	}
+	if history[1].Content != "Here it is.\n\n[2 image(s) were sent to the user with this reply.]" {
+		t.Error("saved history was changed")
+	}
+	for in, want := range map[string]string{
+		"Here's the grid.\n\n[1 image(s) were sent to the user with this reply.]":                          "Here's the grid.",
+		"[1 image(s) returned. They will be sent to the user with your reply; you cannot see them.] Done.": "Done.",
+		"Two cars today. [2 images were sent to the user.]":                                                "Two cars today.",
+		"Use [brackets] normally.": "Use [brackets] normally.",
+	} {
+		if got := stripImageNotes(in); got != want {
+			t.Errorf("stripImageNotes(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

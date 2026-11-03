@@ -46,7 +46,10 @@ type fileConfig struct {
 	SystemPrompt string `yaml:"system_prompt"`
 	Reaction     string `yaml:"reaction"`
 	DataDir      string `yaml:"data_dir"`
-	Knowledge    struct {
+	Schedules    struct {
+		Enabled string `yaml:"enabled"`
+	} `yaml:"schedules"`
+	Knowledge struct {
 		Dir      string `yaml:"dir"`
 		MaxChars string `yaml:"max_chars"`
 	} `yaml:"knowledge"`
@@ -83,6 +86,7 @@ var fileKeys = map[string]string{
 	"SYSTEM_PROMPT":        "system_prompt",
 	"REACTION":             "reaction",
 	"DATA_DIR":             "data_dir",
+	"SCHEDULES":            "schedules.enabled",
 	"KNOWLEDGE_DIR":        "knowledge.dir",
 	"KNOWLEDGE_MAX_CHARS":  "knowledge.max_chars",
 	"MCP_ALLOW_WRITE":      "mcp.allow_write",
@@ -157,6 +161,7 @@ func loadFile(path string) (file, error) {
 		"SYSTEM_PROMPT":        fc.SystemPrompt,
 		"REACTION":             fc.Reaction,
 		"DATA_DIR":             fc.DataDir,
+		"SCHEDULES":            fc.Schedules.Enabled,
 		"KNOWLEDGE_DIR":        fc.Knowledge.Dir,
 		"KNOWLEDGE_MAX_CHARS":  fc.Knowledge.MaxChars,
 		"MCP_ALLOW_WRITE":      fc.MCP.AllowWrite,

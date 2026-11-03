@@ -347,8 +347,8 @@ func TestServerKnowledge(t *testing.T) {
 	}
 
 	for ref, want := range map[string]string{
-		"missing.md":     `"missing.md": no such file in ` + know,
-		"dir.md":         `"dir.md": no such file`,
+		"missing.md":     `"missing.md": no such file in ` + know + ` (it has: dir.md, home-assistant.md)`,
+		"dir.md":         `"dir.md" in ` + know + ` is not a regular file`,
 		"notes.txt":      `"notes.txt": want a .md file name`,
 		"../etc/x.md":    `want just a file name in`,
 		"/abs/path/x.md": `want just a file name in`,
@@ -357,5 +357,55 @@ func TestServerKnowledge(t *testing.T) {
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "mcp.servers.ha in ") || !strings.Contains(err.Error(), want) {
 			t.Errorf("knowledge %q: got %v, want %q", ref, err, want)
 		}
+	}
+}
+
+func TestServerKnowledgeUnreadable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root can read anything")
+	}
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	know := t.TempDir()
+	os.WriteFile(filepath.Join(know, "ha.md"), []byte("notes"), 0o000)
+	t.Setenv("KNOWLEDGE_DIR", know)
+	writeConfig(t, "mcp:\n  servers:\n    ha:\n      url: http://ha/mcp\n      knowledge: ha.md\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), `"ha.md": can't read it: permission denied`) {
+		t.Errorf("unreadable file: %v", err)
+	}
+
+	os.Chmod(filepath.Join(know, "ha.md"), 0o644)
+	os.Chmod(know, 0o000)
+	defer os.Chmod(know, 0o755)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "can't open the folder") || !strings.Contains(err.Error(), "chmod 755") {
+		t.Errorf("unreadable folder: %v", err)
+	}
+
+	os.Chmod(know, 0o755)
+	t.Setenv("KNOWLEDGE_DIR", filepath.Join(know, "nope"))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "doesn't exist (is /config mounted?)") {
+		t.Errorf("missing folder: %v", err)
+	}
+}
+
+func TestSchedulesSetting(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	c, err := Load()
+	if err != nil || !c.Schedules || !strings.Contains(c.Describe(), "SCHEDULES: true\n") {
+		t.Fatalf("default: %v %v", c.Schedules, err)
+	}
+	t.Setenv("SCHEDULES", "false")
+	if c, err = Load(); err != nil || c.Schedules {
+		t.Fatalf("SCHEDULES=false: %v %v", c.Schedules, err)
+	}
+	t.Setenv("SCHEDULES", "")
+	writeConfig(t, "schedules:\n  enabled: false\n")
+	if c, err = Load(); err != nil || c.Schedules {
+		t.Fatalf("schedules.enabled: false: %v %v", c.Schedules, err)
+	}
+	writeConfig(t, "schedules:\n  enabled: sometimes\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "schedules.enabled in ") {
+		t.Fatalf("bad value: %v", err)
 	}
 }

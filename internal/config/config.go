@@ -2,7 +2,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -46,6 +48,8 @@ type Config struct {
 	MCPTools    map[string]bool  // optional allowlist of tool names, across servers
 	MCPWrite    toolbox.Write    // default for servers without their own allow_write
 	MCPMaxChars int              // cap on tool output given to the model
+
+	Schedules bool // scheduled checks (create_schedule tool, /schedules)
 
 	KnowledgeDir      string // folder of Markdown notes for the model (see package knowledge)
 	KnowledgeMaxChars int    // cap on what those notes add to the prompt
@@ -131,6 +135,9 @@ func Load() (Config, error) {
 			c.MCPTools[t] = true
 		}
 	}
+	if c.Schedules, err = strconv.ParseBool(s.get("SCHEDULES", "true")); err != nil {
+		return c, fmt.Errorf("%s must be true or false", s.name("SCHEDULES"))
+	}
 	if c.KnowledgeMaxChars, err = strconv.Atoi(s.get("KNOWLEDGE_MAX_CHARS", strconv.Itoa(knowledge.DefaultMaxChars))); err != nil || c.KnowledgeMaxChars < 500 {
 		return c, fmt.Errorf("%s must be an integer >= 500", s.name("KNOWLEDGE_MAX_CHARS"))
 	}
@@ -165,7 +172,7 @@ func (s settings) name(key string) string {
 }
 
 // checkKnowledge checks a server's knowledge file: a .md file name in the knowledge folder,
-// which must exist.
+// which must exist and be readable. Errors say which of those failed, and what's there instead.
 func (s settings) checkKnowledge(name string) error {
 	dir := s.get("KNOWLEDGE_DIR", "/config/knowledge")
 	switch {
@@ -174,9 +181,38 @@ func (s settings) checkKnowledge(name string) error {
 	case filepath.Base(name) != name:
 		return fmt.Errorf("%q: want just a file name in %s, e.g. ha.md", name, dir)
 	}
-	info, err := os.Stat(filepath.Join(dir, name))
-	if err != nil || !info.Mode().IsRegular() {
-		return fmt.Errorf("%q: no such file in %s", name, dir)
+	runAs := fmt.Sprintf("signal-ollama runs as uid %d", os.Getuid())
+	entries, err := os.ReadDir(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("%q: the folder %s doesn't exist (is /config mounted?)", name, dir)
+	case errors.Is(err, fs.ErrPermission):
+		return fmt.Errorf("%q: can't open the folder %s: permission denied (%s; the folder needs r-x for it, e.g. chmod 755)", name, dir, runAs)
+	case err != nil:
+		return fmt.Errorf("%q: can't read the folder %s: %w", name, dir, err)
+	}
+	var mds []string
+	for _, e := range entries {
+		if strings.EqualFold(filepath.Ext(e.Name()), ".md") {
+			mds = append(mds, e.Name())
+		}
+	}
+	f, err := os.Open(filepath.Join(dir, name))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		there := "no .md files"
+		if len(mds) > 0 {
+			there = strings.Join(mds, ", ")
+		}
+		return fmt.Errorf("%q: no such file in %s (it has: %s)", name, dir, there)
+	case errors.Is(err, fs.ErrPermission):
+		return fmt.Errorf("%q: can't read it: permission denied (%s; the file needs r-- for it, e.g. chmod 644)", name, runAs)
+	case err != nil:
+		return fmt.Errorf("%q: can't read it: %w", name, err)
+	}
+	defer f.Close()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("%q in %s is not a regular file", name, dir)
 	}
 	return nil
 }
@@ -311,6 +347,8 @@ func (c Config) Describe() string {
 	}
 	line("REACTION", reaction)
 	line("DATA_DIR", c.DataDir)
+	line("SCHEDULES", c.Schedules)
+	line("TZ", time.Local.String())
 	line("KNOWLEDGE_DIR", c.KnowledgeDir)
 	line("KNOWLEDGE_MAX_CHARS", c.KnowledgeMaxChars)
 	if len(c.MCPServers) == 0 {

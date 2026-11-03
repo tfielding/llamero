@@ -14,7 +14,7 @@ import (
 func instant(text string) bool {
 	f := strings.Fields(strings.ToLower(text))
 	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings" ||
-		f[0] == "/knowledge")
+		f[0] == "/knowledge" || f[0] == "/schedules")
 }
 
 func isRetry(text string) bool {
@@ -51,8 +51,14 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		if chat.Summary != "" {
 			memory += " + summary of older ones"
 		}
-		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %s\nKnowledge: %s\nOllama: %s\n%sNow: %s",
-			current, thinking, memory, b.knowledgeSummary(), ollamaState, b.toolsStatus(ctx), b.now(sender))
+		schedules := ""
+		if b.opt.Schedules != nil {
+			schedules = "Schedules: " + b.schedulesSummary(sender) + "\n"
+		}
+		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %s\nKnowledge: %s\n%sOllama: %s\n%sNow: %s",
+			current, thinking, memory, b.knowledgeSummary(), schedules, ollamaState, b.toolsStatus(ctx), b.now(sender))
+	case "/schedules", "/schedule":
+		return b.schedulesCommand(ctx, sender, args)
 	case "/knowledge":
 		return b.knowledgeText()
 	case "/think":
@@ -123,6 +129,7 @@ const helpText = `Commands:
 /stats - speed of the last reply
 /settings - current configuration (secrets hidden)
 /knowledge - notes the bot has from the knowledge folder
+/schedules - scheduled checks (delete, pause, resume or run with a number)
 /wake - wake the Ollama machine (Wake-on-LAN)
 /help - this message`
 

@@ -9,13 +9,16 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+	_ "time/tzdata" // TZ works in the distroless image, which has no zoneinfo
 
 	"github.com/tfielding/signal-ollama/internal/bot"
 	"github.com/tfielding/signal-ollama/internal/config"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/signal-ollama/internal/schedule"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
@@ -78,10 +81,17 @@ func run() error {
 		tools = box
 	}
 	know := knowledge.New(cfg.KnowledgeDir, cfg.KnowledgeRefs(), cfg.KnowledgeMaxChars)
+	var schedules *schedule.Store
+	if cfg.Schedules {
+		if schedules, err = schedule.NewStore(filepath.Join(cfg.DataDir, "schedules")); err != nil {
+			return err
+		}
+	}
 	know.Get() // log what's there at startup
 	b := bot.New(sc, llm, st, bot.Options{
 		Tools:        tools,
 		Knowledge:    know,
+		Schedules:    schedules,
 		OwnNumber:    cfg.SignalNumber,
 		Allowed:      cfg.Allowed,
 		DefaultModel: cfg.DefaultModel,
@@ -95,7 +105,8 @@ func run() error {
 		Reaction:     cfg.Reaction,
 	})
 
-	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
+	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
+	b.StartScheduler(ctx)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()
 	if errors.Is(err, context.Canceled) {

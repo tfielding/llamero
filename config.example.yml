@@ -24,6 +24,8 @@ ollama:
 #   summary_model: llama3.2:latest
 # system_prompt: You are a helpful assistant ...
 # reaction: 👀
+# schedules:
+#   enabled: true                       # scheduled checks: ask "every weekday at 7:30 tell me ..."
 # knowledge:                           # notes for the model: .md files in this folder
 #   dir: /config/knowledge
 #   max_chars: 8000

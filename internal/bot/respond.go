@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -60,25 +61,6 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if model == "" {
 		model = b.opt.DefaultModel
 	}
-	msgs := make([]ollama.Message, 0, len(chat.History)+4)
-	if b.opt.SystemPrompt != "" {
-		msgs = append(msgs, ollama.Message{Role: "system", Content: b.opt.SystemPrompt})
-	}
-	var know knowledge.Snapshot
-	if b.opt.Knowledge != nil {
-		know = b.opt.Knowledge.Get()
-	}
-	if know.General != "" {
-		msgs = append(msgs, ollama.Message{Role: "system", Content: knowledgeIntro + know.General})
-	}
-	head := len(msgs) // tool guidance goes here, after the instructions and before the conversation
-	if chat.Summary != "" {
-		msgs = append(msgs, ollama.Message{Role: "system", Content: "Summary of the earlier conversation " +
-			"(those messages are no longer shown):\n" + chat.Summary})
-	}
-	msgs = append(msgs, chat.History...)
-	msgs = append(msgs, ollama.Message{Role: "user", Content: text})
-
 	// Fail fast with a clear message if Ollama is down (e.g. the machine is asleep),
 	// or wake it first if Wake-on-LAN is set up.
 	if err := b.llm.Ping(ctx); err != nil {
@@ -98,19 +80,15 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	info, _ := b.llm.Info(ctx, model)
 	think := b.thinkValue(ctx, model, chat.Think)
 	var tools []toolbox.Tool
-	if b.opt.Tools != nil && info.Has("tools") {
-		tools = b.opt.Tools.Tools(ctx)
-	}
-
-	if len(tools) > 0 {
-		// Inserted after the main system prompt so it applies even with a custom SYSTEM_PROMPT.
-		content := toolGuidance
-		if extra := b.opt.Tools.Guidance(tools, know.Servers); extra != "" {
-			content += "\n\n" + extra
+	if info.Has("tools") {
+		if b.opt.Tools != nil {
+			tools = append(tools, b.opt.Tools.Tools(ctx)...)
 		}
-		guide := ollama.Message{Role: "system", Content: content}
-		msgs = append(msgs[:head], append([]ollama.Message{guide}, msgs[head:]...)...)
+		if b.opt.Schedules != nil {
+			tools = append(tools, scheduleTools()...)
+		}
 	}
+	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: text})
 
 	slog.Info("asking model", "model", model, "history", len(chat.History), "think", chat.Think, "tools", len(tools))
 	start := time.Now()
@@ -139,6 +117,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	}
 	slog.Info("model replied", "model", model, "took", time.Since(start).Round(100*time.Millisecond),
 		"tokens", stats.EvalCount, "tok_per_s", fmt.Sprintf("%.1f", stats.TokensPerSecond()), "images", len(images))
+	answer = stripImageNotes(answer)
 	if answer == "" && len(images) == 0 {
 		answer = "(empty reply)"
 	}
@@ -149,20 +128,88 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if len(images) > 0 {
 		saved += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", len(images))
 	}
-	// With summaries on, messages past the limit wait to be summarized after the reply is sent.
-	// If summaries keep failing, the oldest are dropped at twice the limit.
-	limit := b.opt.HistoryLimit
-	if b.opt.Summarize {
-		limit *= 2
-	}
 	chat.History = trim(append(chat.History,
 		ollama.Message{Role: "user", Content: text},
-		ollama.Message{Role: "assistant", Content: strings.TrimSpace(saved)}), limit)
+		ollama.Message{Role: "assistant", Content: strings.TrimSpace(saved)}), b.historyCap())
 	if err := b.store.Save(sender, chat); err != nil {
 		slog.Error("save history", "err", err)
 	}
 	return response{text: answer, fromModel: true, images: images,
 		summarize: b.opt.Summarize && len(chat.History) > b.opt.HistoryLimit}
+}
+
+// prompt builds the messages for the model: instructions, notes, tool guidance (if there are
+// tools), the conversation so far, then last.
+func (b *Bot) prompt(chat store.Chat, tools []toolbox.Tool, last ollama.Message) []ollama.Message {
+	msgs := make([]ollama.Message, 0, len(chat.History)+6)
+	if b.opt.SystemPrompt != "" {
+		msgs = append(msgs, ollama.Message{Role: "system", Content: b.opt.SystemPrompt})
+	}
+	var know knowledge.Snapshot
+	if b.opt.Knowledge != nil {
+		know = b.opt.Knowledge.Get()
+	}
+	if know.General != "" {
+		msgs = append(msgs, ollama.Message{Role: "system", Content: knowledgeIntro + know.General})
+	}
+	if len(tools) > 0 {
+		// After the main system prompt, so it applies even with a custom SYSTEM_PROMPT.
+		content := toolGuidance
+		if b.opt.Tools != nil {
+			if extra := b.opt.Tools.Guidance(tools, know.Servers); extra != "" {
+				content += "\n\n" + extra
+			}
+		}
+		msgs = append(msgs, ollama.Message{Role: "system", Content: content})
+	}
+	if chat.Summary != "" {
+		msgs = append(msgs, ollama.Message{Role: "system", Content: "Summary of the earlier conversation " +
+			"(those messages are no longer shown):\n" + chat.Summary})
+	}
+	msgs = append(msgs, forPrompt(chat.History)...)
+	return append(msgs, last)
+}
+
+// historyCap is how many messages a chat keeps. With summaries on, messages past the limit wait
+// to be summarized after the reply is sent; if summaries keep failing, the oldest are dropped
+// at twice the limit.
+func (b *Bot) historyCap() int {
+	if b.opt.Summarize {
+		return b.opt.HistoryLimit * 2
+	}
+	return b.opt.HistoryLimit
+}
+
+// imageNote is saved after a reply that sent images, so later turns know they were sent.
+var imageNote = regexp.MustCompile(`\s*\[(\d+) image\(s\) were sent to the user with this reply\.\]\s*$`)
+
+// anyImageNote matches the image notes in any wording the model might copy into a reply.
+var anyImageNote = regexp.MustCompile(`(?i)\s*\[\d+ images?(\(s\))? (were|was|are|will be|returned|attached)[^\]\n]*\]`)
+
+// forPrompt prepares saved history for the model. The image note saved with a reply is moved
+// out of the reply into a system line: left in, the model copies it into its own replies.
+func forPrompt(history []ollama.Message) []ollama.Message {
+	out := make([]ollama.Message, 0, len(history))
+	for _, m := range history {
+		if m.Role != "assistant" {
+			out = append(out, m)
+			continue
+		}
+		loc := imageNote.FindStringSubmatchIndex(m.Content)
+		if loc == nil {
+			out = append(out, m)
+			continue
+		}
+		n := m.Content[loc[2]:loc[3]]
+		m.Content = strings.TrimSpace(m.Content[:loc[0]])
+		out = append(out, m, ollama.Message{Role: "system", Content: "(That reply also sent " + n + " image(s) to the user.)"})
+	}
+	return out
+}
+
+// stripImageNotes removes image notes the model copied into its answer.
+func stripImageNotes(answer string) string {
+	return strings.TrimSpace(anyImageNote.ReplaceAllString(answer, ""))
 }
 
 // unanswered records text as the message /retry should answer, and returns r. It reloads
@@ -233,6 +280,14 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 				msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: unknownTool(name, tools)})
 				continue
 			}
+			if isScheduleTool(name) {
+				if problem := b.checkScheduleCall(sender, name, tc.Function.Arguments); problem != "" {
+					failures++
+					lastFailure = problem
+					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: problem})
+					continue
+				}
+			}
 			if b.needsApproval(tools, name) {
 				decline, timedOut, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments, lastFailure)
 				if err != nil {
@@ -249,7 +304,13 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 			}
 			b.setTool(sender, name)
 			start := time.Now()
-			out, err := b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
+			var out toolbox.Output
+			var err error
+			if isScheduleTool(name) {
+				out = b.callScheduleTool(sender, name, tc.Function.Arguments)
+			} else {
+				out, err = b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
+			}
 			b.setTool(sender, "")
 			if ctx.Err() != nil {
 				return "", nil, stats, ctx.Err()

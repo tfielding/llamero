@@ -24,6 +24,8 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
   lines, tables become label/value lines
 - Tools from MCP servers; pictures they return are sent to you as attachments (see [Tools](#tools-mcp))
 - A [knowledge folder](#knowledge) of notes the model always has: people, routines, how to use each tool
+- [Scheduled checks](#schedules) set up by just asking: "every weekday at 7:30 tell me what happened
+  overnight on the cameras", "remind me at 5pm to check the porch"
 - Wakes a sleeping Ollama machine with [Wake-on-LAN](#wake-on-lan), or says right away that it's offline
 - Messages from one person are answered in order; different people don't block each other
 
@@ -41,12 +43,14 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
 | `/status` | Model, thinking, memory, knowledge, whether Ollama is online, available tools, what's running now |
 | `/stats` | Speed of the last reply |
 | `/knowledge` | Which notes are loaded from the knowledge folder, and when each is used |
+| `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
+| `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
 | `/wake` | Wake the Ollama machine (Wake-on-LAN) |
 | `/help` | This list |
 
-`/status`, `/stats`, `/stop`, `/summary`, `/knowledge` and `/settings` answer right away, even
-while a reply is being written.
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules` and `/settings` answer right
+away, even while a reply is being written.
 
 ## What it answers
 
@@ -95,6 +99,7 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
     image: ghcr.io/tfielding/signal-ollama:latest
     restart: always
     environment:                # values for the ${...} in config.yml, from your .env
+      - TZ=America/New_York     # your time zone, for schedules and times
       - SIGNAL_NUMBER=${SIGNAL_NUMBER}
       - ALLOWED_SENDERS=${ALLOWED_SENDERS}
     volumes:
@@ -180,6 +185,8 @@ Settings come from an optional config file, environment variables, or both.
 | | `mcp.servers.<name>.knowledge` | `<name>.md` if present | The server's notes file in the [knowledge folder](#knowledge); must exist |
 | `MCP_TOOLS` | `mcp.tools` | all | Only these tools, across all servers |
 | `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
+| `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
+| `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
 | `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
 | `DATA_DIR` | `data_dir` | `/data` | Chat history |
@@ -248,6 +255,41 @@ Reply yes to run it, anything else cancels (2 min).
 - If an approved call fails and the model retries, the next prompt says why the last try failed.
 - `/status` shows what's waiting; `/stop` cancels the whole reply.
 
+## Schedules
+
+Ask for a check to run later or regularly, in plain words, and the bot sets it up after you
+approve it:
+
+```
+You: every weekday at 7:30 tell me what happened overnight on the cameras
+
+Create this schedule?
+• when: weekdays 07:30 (first: Wed 4 Nov 07:30)
+• task: Summarize camera alerts since 22:00 yesterday
+Reply yes to save it, anything else cancels (2 min).
+```
+
+At 07:30 the model does the task with your tools and the result arrives as a message starting
+with ⏰. It joins the conversation, so you can follow up ("show me that one").
+
+- **When:** `every 30m`, `every 2h between 22:00 and 06:00`, `daily 07:30`, `weekdays 07:30`,
+  `weekends 10:00`, `mon,wed,fri 18:00`, or once: `at 17:00`, `tomorrow 9am`, `2026-11-10 08:00`.
+  At most every 15 minutes, in the `TZ` time zone. One-offs are deleted after they run.
+- **Only when it matters:** "tell me *if* the garage door is open" saves an "only if" condition.
+  The check then stays silent unless the condition is true.
+- **Look, don't touch:** scheduled checks only get read-only tools. Nobody is there to approve an
+  action, so a check can report that the garage door is open, but never close it.
+- **Ollama asleep or down:** the check is skipped (and logged), unless the schedule was created
+  with `wake`, which wakes the machine quietly first. A check that's overdue by more than 10
+  minutes, e.g. because the bot was down, is skipped rather than run late. Frequent checks keep
+  the Ollama machine awake.
+- **Managing them:** ask ("delete the porch check") or use `/schedules`, `/schedules pause 2`,
+  `resume`, `delete`, or `run` (run now, even if paused). Up to 20 per chat; saved in
+  `data/schedules`.
+- Checks wait their turn behind your own messages, and `/stop` cancels one that's running.
+- For instant alerts ("someone's at the door"), schedules are the wrong tool: they look every so
+  often. Use Frigate's or Home Assistant's own notifications for those.
+
 ## Long chats
 
 Each chat keeps its last `HISTORY_LIMIT` messages word for word. Past that, the older messages are
@@ -278,7 +320,8 @@ answers as usual. `/stop` cancels the wait; `/wake` sends a wake-up on demand.
 
 - **Allowlist only.** Only `ALLOWED_SENDERS` get answers; group chats are ignored.
 - **Read-only tools by default.** Tools that can change things are hidden unless a server allows
-  them, and with `ask` each call needs your approval.
+  them, and with `ask` each call needs your approval. Scheduled checks only ever get read-only
+  tools, and creating or deleting a schedule needs your approval.
 - **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
   removes credentials from URLs.
 - **Local only.** Chats and knowledge notes only go to your Ollama server. Chat history is stored

@@ -7,11 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Scheduled checks: ask "every weekday at 7:30 tell me what happened overnight on the cameras" or
+  "remind me at 5pm to …", approve, and the result arrives on time. Repeats (`every 30m`, with an
+  optional window like `between 22:00 and 06:00`), times of day on chosen days, and one-offs.
+  "Only if" checks stay silent unless something's worth reporting. Scheduled runs only get
+  read-only tools; creating and deleting need approval. `/schedules` lists them, with `delete`,
+  `pause`, `resume` and `run`. `SCHEDULES` (default `true`) turns them off; `TZ` sets the time zone.
 - Knowledge folder (`KNOWLEDGE_DIR`, default `/config/knowledge`): Markdown notes the model always
   gets (people, cars, routines), and per-MCP-server notes (`frigate.md` for the server `frigate`)
   given only with that server's tools. Edits apply from the next message. Capped at
   `KNOWLEDGE_MAX_CHARS` (8000). New `/knowledge` command; `/status` shows the total.
-
 - Optional config file, `/config/config.yml` (or `CONFIG_FILE`), with every setting; see
   `config.example.yml`. Environment variables still work and win over the file. `${VAR}` in the file
   is filled in from the environment. Invalid settings, unknown keys and unset `${VAR}`s stop the bot
@@ -22,13 +27,19 @@ All notable changes to this project are documented here. The format follows
   servers that don't set it.
 - Stricter startup checks: `SIGNAL_URL` and `OLLAMA_URL` must be http(s) URLs, `OLLAMA_TIMEOUT` positive.
 
-### Removed
-- `MCP_HINT_<NAME>`: put per-server notes in the knowledge folder as `<name>.md` instead.
-
 ### Changed
+- Clearer startup errors for knowledge files: a missing file lists what's in the folder, and an
+  unreadable file or folder says "permission denied" with the fix.
 - The compose example follows Frigate's layout: `/opt/signal-ollama/config:/config:ro` for what you
   write, `/opt/signal-ollama/data:/data` for chat history. Existing setups that map a folder to
   `/data` keep working; add a `/config` mount to use the knowledge folder.
+
+### Fixed
+- Replies no longer end with "[1 image(s) were sent to the user with this reply.]": the model was
+  copying the note kept in the chat history.
+
+### Removed
+- `MCP_HINT_<NAME>`: put per-server notes in the knowledge folder as `<name>.md` instead.
 
 ## [0.2.0] - 2026-11-01
 

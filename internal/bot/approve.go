@@ -58,7 +58,11 @@ func (b *Bot) approve(ctx context.Context, sender string, tools []toolbox.Tool, 
 		b.mu.Unlock()
 	}()
 
-	if err := b.msg.Send(ctx, sender, approvalPrompt(tools, name, args, lastFailure, b.opt.ApprovalTimeout), false, nil); err != nil {
+	prompt := approvalPrompt(tools, name, args, lastFailure, b.opt.ApprovalTimeout)
+	if isScheduleTool(name) {
+		prompt = b.schedulePrompt(sender, name, args, b.opt.ApprovalTimeout)
+	}
+	if err := b.msg.Send(ctx, sender, prompt, false, nil); err != nil {
 		slog.Error("send approval request", "err", err)
 		return "Couldn't ask the user for approval, so this action was NOT run.", false, nil
 	}
