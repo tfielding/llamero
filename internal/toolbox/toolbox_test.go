@@ -99,7 +99,7 @@ func TestReconnectsAfterServerRestart(t *testing.T) {
 
 func TestParseServers(t *testing.T) {
 	got, err := ParseServers(" go2rtc=http://go2rtc-mcp:8090/mcp , ha=https://ha/mcp", func(kind, n string) string { return kind + "-" + n })
-	if err != nil || len(got) != 2 || got[0].Name != "go2rtc" || got[0].URL != "http://go2rtc-mcp:8090/mcp" || got[1].Token != "TOKEN-ha" || got[1].Hint != "HINT-ha" {
+	if err != nil || len(got) != 2 || got[0].Name != "go2rtc" || got[0].URL != "http://go2rtc-mcp:8090/mcp" || got[1].Token != "TOKEN-ha" {
 		t.Fatalf("%+v %v", got, err)
 	}
 	for _, bad := range []string{"noequals", "x=ftp://a", "a=http://x,a=http://y", "=http://x"} {
@@ -250,7 +250,7 @@ func TestNoRetryForActionTools(t *testing.T) {
 		})
 	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil))
 	defer srv.Close()
-	box := New([]Server{{Name: "ha", URL: srv.URL}}, Options{AllowWrite: true})
+	box := New([]Server{{Name: "ha", URL: srv.URL, Write: WriteOn}}, Options{})
 	defer box.Close()
 	out, _ := box.Call(context.Background(), "turn_off", map[string]any{"area": "Kitchen"})
 	if !out.IsError || out.Retried != "" || calls.Load() != 1 {
@@ -266,24 +266,32 @@ func TestGuidanceFromServerAndConfig(t *testing.T) {
 		})
 	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil))
 	defer srv.Close()
-	plain := server(t, "cams", "snap") // no instructions, no hint
+	plain := server(t, "cams", "snap") // no instructions
+	ls := mcp.NewServer(&mcp.Implementation{Name: "long", Version: "1"}, &mcp.ServerOptions{Instructions: strings.Repeat("x", 5000)})
+	mcp.AddTool(ls, &mcp.Tool{Name: "lng", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil
+		})
+	long := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return ls }, nil))
+	defer long.Close()
 
 	box := New([]Server{
-		{Name: "ha", URL: srv.URL, Hint: "Call it without filters."},
+		{Name: "ha", URL: srv.URL},
 		{Name: "cams", URL: plain.URL},
-		{Name: "long", URL: plain.URL, Hint: strings.Repeat("x", 5000)},
+		{Name: "long", URL: long.URL},
 	}, Options{})
 	defer box.Close()
 	tools := box.Tools(context.Background())
-	g := box.Guidance(tools)
+	g := box.Guidance(tools, map[string]string{"ha": "Call it without filters.", "cams": "driveway faces the street.", "absent": "never shown"})
 	if !strings.Contains(g, `Notes for the "ha" tools:`) || !strings.Contains(g, "Use GetLiveContext for overviews.") ||
-		!strings.Contains(g, "Call it without filters.") || strings.Contains(g, `"cams"`) {
+		!strings.Contains(g, "Call it without filters.") || !strings.Contains(g, "Notes for the \"cams\" tools:\ndriveway faces the street.") ||
+		strings.Contains(g, "never shown") {
 		t.Fatalf("guidance: %q", g)
 	}
 	if !strings.Contains(g, `"long"`) || len(g) > 2*maxGuidanceChars+200 {
-		t.Fatalf("long hint not capped: %d chars", len(g))
+		t.Fatalf("long instructions not capped: %d chars", len(g))
 	}
-	if box.Guidance(nil) != "" {
+	if box.Guidance(nil, map[string]string{"cams": "x"}) != "" {
 		t.Fatal("guidance without tools")
 	}
 }
@@ -301,5 +309,57 @@ func TestWrapLists(t *testing.T) {
 	want := map[string]any{"kind": []any{"lamp"}, "tags": []any{"a"}, "name": "Office", "value": "x"}
 	if !reflect.DeepEqual(got, want) || len(dropped) != 0 {
 		t.Fatalf("got %v (dropped %v), want %v", got, dropped, want)
+	}
+}
+
+// mixedServer has a read-only tool "look" and a tool "act" that can change things.
+func mixedServer(t *testing.T, name string) *httptest.Server {
+	s := mcp.NewServer(&mcp.Implementation{Name: name, Version: "1"}, nil)
+	f := false
+	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil, nil
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: name + "_look", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}, handler)
+	mcp.AddTool(s, &mcp.Tool{Name: name + "_act", Annotations: &mcp.ToolAnnotations{DestructiveHint: &f}}, handler)
+	mcp.AddTool(s, &mcp.Tool{Name: name + "_extra", Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}, handler)
+	srv := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, nil))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestPerServerWriteAndTools(t *testing.T) {
+	box := New([]Server{
+		{Name: "off", URL: mixedServer(t, "off").URL, Write: WriteOff},
+		{Name: "ask", URL: mixedServer(t, "ask").URL, Write: WriteAsk, Tools: map[string]bool{"ask_look": true, "ask_act": true}},
+		{Name: "on", URL: mixedServer(t, "on").URL, Write: WriteOn},
+	}, Options{})
+	defer box.Close()
+	got := map[string]Tool{}
+	for _, tl := range box.Tools(context.Background()) {
+		got[tl.Name] = tl
+	}
+	want := map[string]bool{ // name -> needs approval
+		"off_look": false, "off_extra": false,
+		"ask_look": false, "ask_act": true,
+		"on_look": false, "on_act": false, "on_extra": false,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("tools: %v", got)
+	}
+	for name, confirm := range want {
+		if tl, ok := got[name]; !ok || tl.Confirm != confirm {
+			t.Errorf("%s: present %v, confirm %v (want %v)", name, ok, tl.Confirm, confirm)
+		}
+	}
+}
+
+func TestParseWrite(t *testing.T) {
+	for in, want := range map[string]Write{"": WriteOff, "false": WriteOff, "No": WriteOff, "ask": WriteAsk, " ASK ": WriteAsk, "true": WriteOn, "yes": WriteOn} {
+		if got, err := ParseWrite(in); err != nil || got != want {
+			t.Errorf("ParseWrite(%q) = %v, %v", in, got, err)
+		}
+	}
+	if _, err := ParseWrite("maybe"); err == nil || !strings.Contains(err.Error(), "want false, ask or true") {
+		t.Errorf("maybe: %v", err)
 	}
 }

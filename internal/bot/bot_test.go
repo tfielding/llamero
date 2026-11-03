@@ -586,7 +586,7 @@ func TestSettings(t *testing.T) {
 	}
 	b.opt.Settings = "HISTORY_LIMIT: 4"
 	b.Handle(dm(me, "/settings"))
-	if r := reply(t, m); r != "Settings (environment variables):\nHISTORY_LIMIT: 4" {
+	if r := reply(t, m); r != "Settings:\nHISTORY_LIMIT: 4" {
 		t.Fatalf("settings: %q", r)
 	}
 }

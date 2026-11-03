@@ -5,6 +5,8 @@ services:
     container_name: signal-ollama
     build: ./signal-ollama          # path to this repo
     restart: always
+    # Settings can go here as environment variables, or in /opt/signal-ollama/config/config.yml
+    # (see config.example.yml), or both; environment variables win.
     environment:
       - SIGNAL_URL=http://signal-cli-rest-api:8080
       - SIGNAL_NUMBER=+1XXXXXXXXXX      # number already registered in signal-cli-rest-api
@@ -20,7 +22,10 @@ services:
       # - MCP_SERVERS=cams=http://<go2rtc-mcp-host>:8090/mcp   # tools from MCP servers
       # - MCP_TOKEN_CAMS=...                                   # if that server has AUTH_TOKEN set
     volumes:
-      # the image runs as uid 65532: sudo mkdir -p /opt/signal-ollama && sudo chown 65532:65532 /opt/signal-ollama
-      - /opt/signal-ollama:/data
+      # Like Frigate: config is what you write, data is what the bot writes.
+      #   sudo mkdir -p /opt/signal-ollama/config/knowledge /opt/signal-ollama/data
+      #   sudo chown 65532:65532 /opt/signal-ollama/data    # the image runs as uid 65532
+      - /opt/signal-ollama/config:/config:ro   # config.yml (optional) and knowledge/*.md (see README)
+      - /opt/signal-ollama/data:/data          # chat history
     depends_on:
       - signal-cli-rest-api

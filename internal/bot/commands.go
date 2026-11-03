@@ -13,7 +13,8 @@ import (
 
 func instant(text string) bool {
 	f := strings.Fields(strings.ToLower(text))
-	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings")
+	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings" ||
+		f[0] == "/knowledge")
 }
 
 func isRetry(text string) bool {
@@ -50,8 +51,10 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		if chat.Summary != "" {
 			memory += " + summary of older ones"
 		}
-		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %s\nOllama: %s\n%sNow: %s",
-			current, thinking, memory, ollamaState, b.toolsStatus(ctx), b.now(sender))
+		return fmt.Sprintf("Model: %s\nThinking: %s\nMemory: %s\nKnowledge: %s\nOllama: %s\n%sNow: %s",
+			current, thinking, memory, b.knowledgeSummary(), ollamaState, b.toolsStatus(ctx), b.now(sender))
+	case "/knowledge":
+		return b.knowledgeText()
 	case "/think":
 		return b.thinkCommand(ctx, sender, chat, current, args)
 	case "/stop":
@@ -66,7 +69,7 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		if b.opt.Settings == "" {
 			return "No settings to show."
 		}
-		return "Settings (environment variables):\n" + b.opt.Settings
+		return "Settings:\n" + b.opt.Settings
 	case "/models", "/model": // /model is the old name, still accepted
 		models, err := b.llm.Models(ctx)
 		if err != nil {
@@ -119,8 +122,62 @@ const helpText = `Commands:
 /stop - cancel the reply in progress (and anything waiting)
 /stats - speed of the last reply
 /settings - current configuration (secrets hidden)
+/knowledge - notes the bot has from the knowledge folder
 /wake - wake the Ollama machine (Wake-on-LAN)
 /help - this message`
+
+// knowledgeSummary is the "Knowledge:" value for /status.
+func (b *Bot) knowledgeSummary() string {
+	if b.opt.Knowledge == nil {
+		return "off"
+	}
+	k := b.opt.Knowledge.Get()
+	switch {
+	case k.Err != nil:
+		return "folder unreadable (" + short(k.Err) + ")"
+	case len(k.Files) == 0:
+		return "none"
+	}
+	return fmt.Sprintf("%s, %d characters", plural(len(k.Files), "file"), k.Chars)
+}
+
+// knowledgeText answers /knowledge: which notes are loaded, and when each is used.
+func (b *Bot) knowledgeText() string {
+	if b.opt.Knowledge == nil {
+		return "The knowledge folder is off."
+	}
+	k := b.opt.Knowledge.Get()
+	dir := b.opt.Knowledge.Dir()
+	switch {
+	case k.Err != nil:
+		return fmt.Sprintf("Couldn't read the knowledge folder %s: %s", dir, short(k.Err))
+	case len(k.Files) == 0:
+		return fmt.Sprintf("No notes yet. Put Markdown files in %s: any name for things the bot should always know, "+
+			"or name one after an MCP server (e.g. frigate.md) for notes used with its tools.", dir)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Notes in %s:\n", dir)
+	for _, f := range k.Files {
+		when := "always"
+		if len(f.Servers) > 0 {
+			when = "with the " + strings.Join(f.Servers, " and ") + " tools"
+		}
+		fmt.Fprintf(&sb, "- %s: %d characters, %s", f.Name, f.Chars, when)
+		if f.Cut {
+			sb.WriteString(" (cut off: over the limit)")
+		}
+		sb.WriteString("\n")
+	}
+	fmt.Fprintf(&sb, "Total %d of %d characters. Edits apply from the next message.", k.Chars, b.opt.Knowledge.MaxChars())
+	return sb.String()
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
+}
 
 // stop cancels the model call in progress for sender and drops queued messages.
 func (b *Bot) stop(sender string) string {

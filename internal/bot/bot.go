@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tfielding/signal-ollama/internal/format"
+	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
@@ -36,11 +37,12 @@ type Tools interface {
 	Tools(ctx context.Context) []toolbox.Tool
 	Call(ctx context.Context, name string, args map[string]any) (toolbox.Output, error)
 	Errors() map[string]error
-	Guidance(tools []toolbox.Tool) string
+	Guidance(tools []toolbox.Tool, notes map[string]string) string
 }
 
 type Options struct {
-	Tools           Tools // nil = no tools
+	Tools           Tools           // nil = no tools
+	Knowledge       *knowledge.Base // notes from the knowledge folder; nil = none
 	OwnNumber       string
 	Allowed         map[string]bool
 	DefaultModel    string
@@ -52,7 +54,6 @@ type Options struct {
 	Wake            func(context.Context) error // sends Wake-on-LAN to the Ollama machine; nil = off
 	WakeWait        time.Duration               // how long to wait for Ollama after a wake-up
 	WakePoll        time.Duration               // how often to check while waiting
-	ConfirmWrites   bool                        // ask the user before running a tool that isn't read-only
 	ApprovalTimeout time.Duration               // how long to wait for that answer
 	Reaction        string                      // emoji shown on a message while it's being answered; empty = off
 	TypingRefresh   time.Duration               // Signal clients hide the indicator after ~15s

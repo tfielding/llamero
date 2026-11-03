@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Knowledge folder (`KNOWLEDGE_DIR`, default `/config/knowledge`): Markdown notes the model always
+  gets (people, cars, routines), and per-MCP-server notes (`frigate.md` for the server `frigate`)
+  given only with that server's tools. Edits apply from the next message. Capped at
+  `KNOWLEDGE_MAX_CHARS` (8000). New `/knowledge` command; `/status` shows the total.
+
+- Optional config file, `/config/config.yml` (or `CONFIG_FILE`), with every setting; see
+  `config.example.yml`. Environment variables still work and win over the file. `${VAR}` in the file
+  is filled in from the environment. Invalid settings, unknown keys and unset `${VAR}`s stop the bot
+  at startup with a message naming the setting.
+- Per-MCP-server settings in the config file: `allow_write` (`false`, `ask` or `true`), a `tools`
+  allowlist, and `knowledge` (its notes file in the knowledge folder, checked at startup), e.g.
+  approval for Home Assistant actions only. `MCP_ALLOW_WRITE` is the default for
+  servers that don't set it.
+- Stricter startup checks: `SIGNAL_URL` and `OLLAMA_URL` must be http(s) URLs, `OLLAMA_TIMEOUT` positive.
+
+### Removed
+- `MCP_HINT_<NAME>`: put per-server notes in the knowledge folder as `<name>.md` instead.
+
+### Changed
+- The compose example follows Frigate's layout: `/opt/signal-ollama/config:/config:ro` for what you
+  write, `/opt/signal-ollama/data:/data` for chat history. Existing setups that map a folder to
+  `/data` keep working; add a `/config` mount to use the knowledge folder.
+
 ## [0.2.0] - 2026-11-01
 
 ### Added

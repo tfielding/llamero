@@ -17,7 +17,8 @@ type fakeTools struct {
 	mu    sync.Mutex
 	tools []toolbox.Tool
 	calls []map[string]any
-	fail  string // if set, every call returns this error
+	fail  string            // if set, every call returns this error
+	notes map[string]string // last per-server notes passed to Guidance
 }
 
 func (f *fakeTools) Tools(context.Context) []toolbox.Tool { return f.tools }
@@ -30,9 +31,14 @@ func (f *fakeTools) Call(_ context.Context, name string, args map[string]any) (t
 	}
 	return toolbox.Output{Text: "turned off"}, nil
 }
-func (f *fakeTools) Errors() map[string]error       { return nil }
-func (f *fakeTools) Guidance([]toolbox.Tool) string { return "" }
-func (f *fakeTools) called() int                    { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
+func (f *fakeTools) Errors() map[string]error { return nil }
+func (f *fakeTools) Guidance(_ []toolbox.Tool, notes map[string]string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notes = notes
+	return ""
+}
+func (f *fakeTools) called() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.calls) }
 
 var lightSchema = map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}}
 
@@ -42,10 +48,10 @@ func setupApproval(t *testing.T, confirm bool) (testBot, *fakeMsg, *fakeLLM, *fa
 	t.Helper()
 	b, m, l, _ := setup(t)
 	ft := &fakeTools{tools: []toolbox.Tool{
-		{Name: "turn_off", Schema: lightSchema},
+		{Name: "turn_off", Schema: lightSchema, Confirm: confirm},
 		{Name: "get_state", Schema: lightSchema, ReadOnly: true},
 	}}
-	b.opt.Tools, b.opt.ConfirmWrites, b.opt.ApprovalTimeout = ft, confirm, time.Minute
+	b.opt.Tools, b.opt.ApprovalTimeout = ft, time.Minute
 	tc := &ollama.ToolCall{}
 	tc.Function.Name = "turn_off"
 	tc.Function.Arguments = map[string]any{"name": "kitchen", "bogus": "x"}

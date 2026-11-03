@@ -14,6 +14,7 @@ import (
 
 	"github.com/tfielding/signal-ollama/internal/bot"
 	"github.com/tfielding/signal-ollama/internal/config"
+	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
@@ -67,7 +68,7 @@ func run() error {
 	sc := signalcli.New(cfg.SignalURL, cfg.SignalNumber)
 	var tools bot.Tools
 	if len(cfg.MCPServers) > 0 {
-		box := toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, AllowWrite: cfg.MCPAllowWrite, MaxResultChars: cfg.MCPMaxChars})
+		box := toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
 		defer box.Close()
 		names := []string{}
 		for _, t := range box.Tools(ctx) {
@@ -76,23 +77,25 @@ func run() error {
 		slog.Info("mcp tools", "servers", len(cfg.MCPServers), "tools", names)
 		tools = box
 	}
+	know := knowledge.New(cfg.KnowledgeDir, cfg.KnowledgeRefs(), cfg.KnowledgeMaxChars)
+	know.Get() // log what's there at startup
 	b := bot.New(sc, llm, st, bot.Options{
-		Tools:         tools,
-		OwnNumber:     cfg.SignalNumber,
-		Allowed:       cfg.Allowed,
-		DefaultModel:  cfg.DefaultModel,
-		SystemPrompt:  cfg.SystemPrompt,
-		HistoryLimit:  cfg.HistoryLimit,
-		Summarize:     cfg.Summarize,
-		SummaryModel:  cfg.SummaryModel,
-		Settings:      cfg.Describe(),
-		Wake:          wake,
-		WakeWait:      cfg.WakeWait,
-		ConfirmWrites: cfg.MCPConfirm,
-		Reaction:      cfg.Reaction,
+		Tools:        tools,
+		Knowledge:    know,
+		OwnNumber:    cfg.SignalNumber,
+		Allowed:      cfg.Allowed,
+		DefaultModel: cfg.DefaultModel,
+		SystemPrompt: cfg.SystemPrompt,
+		HistoryLimit: cfg.HistoryLimit,
+		Summarize:    cfg.Summarize,
+		SummaryModel: cfg.SummaryModel,
+		Settings:     cfg.Describe(),
+		Wake:         wake,
+		WakeWait:     cfg.WakeWait,
+		Reaction:     cfg.Reaction,
 	})
 
-	slog.Info("starting", "version", version, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
+	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()
 	if errors.Is(err, context.Canceled) {

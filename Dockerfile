@@ -12,4 +12,5 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /signal-ollama /signal-ollama
 COPY LICENSE THIRD_PARTY_LICENSES /licenses/
 VOLUME /data
+VOLUME /config
 ENTRYPOINT ["/signal-ollama"]

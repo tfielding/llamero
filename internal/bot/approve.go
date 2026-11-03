@@ -14,14 +14,12 @@ import (
 	"github.com/tfielding/signal-ollama/internal/toolbox"
 )
 
-// needsApproval reports whether calling name must be approved first. Tools not in the
-// list are treated as able to change things (run rejects them before this anyway).
+// needsApproval reports whether calling name must be approved first: its server asks for
+// approval of tools that can change things. Tools not in the list need it too (run rejects
+// them before this anyway).
 func (b *Bot) needsApproval(tools []toolbox.Tool, name string) bool {
-	if !b.opt.ConfirmWrites {
-		return false
-	}
 	t, ok := findTool(tools, name)
-	return !ok || !t.ReadOnly
+	return !ok || t.Confirm
 }
 
 func findTool(tools []toolbox.Tool, name string) (toolbox.Tool, bool) {

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
@@ -59,10 +60,18 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if model == "" {
 		model = b.opt.DefaultModel
 	}
-	msgs := make([]ollama.Message, 0, len(chat.History)+2)
+	msgs := make([]ollama.Message, 0, len(chat.History)+4)
 	if b.opt.SystemPrompt != "" {
 		msgs = append(msgs, ollama.Message{Role: "system", Content: b.opt.SystemPrompt})
 	}
+	var know knowledge.Snapshot
+	if b.opt.Knowledge != nil {
+		know = b.opt.Knowledge.Get()
+	}
+	if know.General != "" {
+		msgs = append(msgs, ollama.Message{Role: "system", Content: knowledgeIntro + know.General})
+	}
+	head := len(msgs) // tool guidance goes here, after the instructions and before the conversation
 	if chat.Summary != "" {
 		msgs = append(msgs, ollama.Message{Role: "system", Content: "Summary of the earlier conversation " +
 			"(those messages are no longer shown):\n" + chat.Summary})
@@ -96,15 +105,11 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if len(tools) > 0 {
 		// Inserted after the main system prompt so it applies even with a custom SYSTEM_PROMPT.
 		content := toolGuidance
-		if extra := b.opt.Tools.Guidance(tools); extra != "" {
+		if extra := b.opt.Tools.Guidance(tools, know.Servers); extra != "" {
 			content += "\n\n" + extra
 		}
 		guide := ollama.Message{Role: "system", Content: content}
-		at := 0
-		if b.opt.SystemPrompt != "" {
-			at = 1
-		}
-		msgs = append(msgs[:at], append([]ollama.Message{guide}, msgs[at:]...)...)
+		msgs = append(msgs[:head], append([]ollama.Message{guide}, msgs[head:]...)...)
 	}
 
 	slog.Info("asking model", "model", model, "history", len(chat.History), "think", chat.Think, "tools", len(tools))
@@ -390,6 +395,10 @@ func (b *Bot) typing(ctx context.Context, to string) (stop func()) {
 
 // toolGuidance is added to the prompt whenever tools are available. It is deliberately
 // generic: nothing here knows what the tools are.
+// knowledgeIntro introduces the notes from the knowledge folder.
+const knowledgeIntro = "Background the user wrote for you (people, places, routines). Use it when it's relevant; " +
+	"don't repeat it unprompted.\n\n"
+
 const toolGuidance = "You have tools that can look things up or take actions. " +
 	"Use them whenever an answer depends on information they can provide, instead of guessing or saying you can't. " +
 	"Information from tools can change: call them again rather than relying on earlier messages in this conversation. " +

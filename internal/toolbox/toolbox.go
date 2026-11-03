@@ -30,11 +30,40 @@ const (
 type Server struct {
 	Name  string
 	URL   string
-	Token string // optional bearer token
-	Hint  string // optional usage notes for the model, from config (MCP_HINT_<NAME>)
+	Token string          // optional bearer token
+	Write Write           // what to do with its tools that aren't marked read-only
+	Tools map[string]bool // if non-empty, only these of its tools (names as the server gives them)
+	// Knowledge is the file in the knowledge folder with notes for its tools; empty = <Name>.md if it exists.
+	Knowledge string
 }
 
-// maxGuidanceChars caps each server's instructions + hint in the prompt.
+// Write is what happens with tools that can change things (not marked read-only).
+type Write int
+
+const (
+	WriteOff Write = iota // hidden from the model
+	WriteAsk              // offered; each call waits for the user's approval
+	WriteOn               // offered and run without asking
+)
+
+// ParseWrite reads false, ask or true (also off/no and on/yes).
+func ParseWrite(s string) (Write, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "false", "off", "no", "0":
+		return WriteOff, nil
+	case "ask":
+		return WriteAsk, nil
+	case "true", "on", "yes", "1":
+		return WriteOn, nil
+	}
+	return WriteOff, fmt.Errorf("%q: want false, ask or true", s)
+}
+
+func (w Write) String() string {
+	return [...]string{"false", "ask", "true"}[w]
+}
+
+// maxGuidanceChars caps the instructions each server sends, in the prompt.
 const maxGuidanceChars = 2000
 
 // Tool is a tool as exposed to the model.
@@ -43,6 +72,7 @@ type Tool struct {
 	Description string
 	Schema      any
 	ReadOnly    bool
+	Confirm     bool // calls wait for the user's approval (it can change things, and its server says ask)
 	server      string
 	remote      string // name on the server
 }
@@ -64,8 +94,7 @@ type Output struct {
 }
 
 type Options struct {
-	Allowed        map[string]bool // if non-empty, only these tool names are exposed
-	AllowWrite     bool            // expose tools that aren't marked read-only
+	Allowed        map[string]bool // if non-empty, only these tool names are exposed (across servers)
 	MaxResultChars int             // 0 = DefaultMaxResultChars
 }
 
@@ -404,8 +433,9 @@ func (t Tool) CleanArgs(args map[string]any) (clean map[string]any, dropped []st
 }
 
 // Guidance returns per-server usage notes for the servers behind tools: the instructions
-// each server sent itself, plus any hint from config. Empty if there are none.
-func (b *Box) Guidance(tools []Tool) string {
+// each server sent itself, plus serverNotes (by server name, from the knowledge folder, already
+// size-limited). Empty if there are none.
+func (b *Box) Guidance(tools []Tool, serverNotes map[string]string) string {
 	seen := map[string]bool{}
 	var parts []string
 	for _, t := range tools {
@@ -413,27 +443,21 @@ func (b *Box) Guidance(tools []Tool) string {
 			continue
 		}
 		seen[t.server] = true
-		srv, _ := b.server(t.server)
 		b.mu.Lock()
-		instr := b.instr[t.server]
+		text := strings.TrimSpace(b.instr[t.server])
 		b.mu.Unlock()
-		var notes []string
-		if instr != "" {
-			notes = append(notes, instr)
-		}
-		if h := strings.TrimSpace(srv.Hint); h != "" {
-			notes = append(notes, h)
-		}
-		if len(notes) == 0 {
-			continue
-		}
-		text := strings.Join(notes, "\n")
 		if len(text) > maxGuidanceChars {
 			cut := maxGuidanceChars
 			for cut > 0 && !utf8.RuneStart(text[cut]) {
 				cut--
 			}
 			text = text[:cut] + "…"
+		}
+		if extra := strings.TrimSpace(serverNotes[t.server]); extra != "" {
+			text = strings.TrimSpace(text + "\n\n" + extra)
+		}
+		if text == "" {
+			continue
 		}
 		parts = append(parts, fmt.Sprintf("Notes for the %q tools:\n%s", t.server, text))
 	}
@@ -526,23 +550,28 @@ func (b *Box) server(name string) (Server, bool) {
 	return Server{}, false
 }
 
-// filter applies the allowlist and the read-only rule.
+// filter applies the allowlists and each server's write setting.
 func (b *Box) filter(tools []Tool) []Tool {
 	var out []Tool
 	for _, t := range tools {
+		srv, _ := b.server(t.server)
 		if len(b.opt.Allowed) > 0 && !b.opt.Allowed[t.Name] {
 			continue
 		}
-		if !t.ReadOnly && !b.opt.AllowWrite {
+		if len(srv.Tools) > 0 && !srv.Tools[t.remote] {
+			continue
+		}
+		if !t.ReadOnly && srv.Write == WriteOff {
 			b.mu.Lock()
 			first := !b.hidden[t.server+"/"+t.Name]
 			b.hidden[t.server+"/"+t.Name] = true
 			b.mu.Unlock()
 			if first {
-				slog.Info("hiding tool not marked read-only (allow with MCP_TOOLS + MCP_ALLOW_WRITE=ask or true)", "tool", t.Name, "server", t.server)
+				slog.Info("hiding tool not marked read-only (allow with the server's allow_write: ask or true)", "tool", t.Name, "server", t.server)
 			}
 			continue
 		}
+		t.Confirm = !t.ReadOnly && srv.Write == WriteAsk
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -574,7 +603,7 @@ func (b *Box) Close() {
 }
 
 // ParseServers parses "name=url,name2=url2". setting(kind, name) returns per-server
-// settings: kind is "TOKEN" (bearer token) or "HINT" (usage notes for the model).
+// settings; kind is "TOKEN" (bearer token).
 func ParseServers(spec string, setting func(kind, name string) string) ([]Server, error) {
 	var out []Server
 	seen := map[string]bool{}
@@ -592,7 +621,7 @@ func ParseServers(spec string, setting func(kind, name string) string) ([]Server
 			return nil, fmt.Errorf("MCP_SERVERS: duplicate name %q", name)
 		}
 		seen[name] = true
-		out = append(out, Server{Name: name, URL: url, Token: setting("TOKEN", name), Hint: setting("HINT", name)})
+		out = append(out, Server{Name: name, URL: url, Token: setting("TOKEN", name)})
 	}
 	return out, nil
 }

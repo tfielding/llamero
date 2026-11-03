@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tfielding/signal-ollama/internal/bot"
+	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
@@ -138,14 +141,16 @@ func runToolScenario(t *testing.T, capabilities []string) (map[string]any, []cha
 	llmSrv := fakeOllama(t, capabilities, &reqs, &mu)
 	sigSrv := fakeSignal(t, botNum, me, sends)
 
+	know := t.TempDir()
+	os.WriteFile(filepath.Join(know, "cams.md"), []byte("Snapshots take a second."), 0o644)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	box := toolbox.New([]toolbox.Server{{Name: "cams", URL: cams.URL, Token: "tok", Hint: "Snapshots take a second."}}, toolbox.Options{})
+	box := toolbox.New([]toolbox.Server{{Name: "cams", URL: cams.URL, Token: "tok"}}, toolbox.Options{})
 	defer box.Close()
 	st, _ := store.New(t.TempDir())
 	sc := signalcli.New(sigSrv.URL, botNum)
 	b := bot.New(sc, ollama.New(llmSrv.URL, 5*time.Second), st, bot.Options{
-		Tools: box, OwnNumber: botNum, Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
+		Tools: box, Knowledge: knowledge.New(know, map[string][]string{"cams.md": {"cams"}}, 1000), OwnNumber: botNum, Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
 	})
 	done := make(chan struct{})
 	go func() { sc.Listen(ctx, b.Handle); close(done) }()

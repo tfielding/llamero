@@ -1,0 +1,46 @@
+# signal-ollama configuration: copy to /opt/signal-ollama/config/config.yml (mounted at /config).
+# Everything is optional except signal.number and signal.allowed_senders, and every setting can
+# also be given as an environment variable (see README), which wins over this file.
+# ${VAR} is filled in from the environment, so secrets can stay in your .env file.
+# Invalid settings or unknown keys stop signal-ollama at startup with a message saying which.
+
+signal:
+  url: http://signal-cli-rest-api:8080
+  number: ${SIGNAL_NUMBER}
+  allowed_senders: ${ALLOWED_SENDERS}   # or a list: [+15550000001, +15550000002]
+
+ollama:
+  url: http://192.168.1.50:11434
+  model: llama3.2:latest                # default: the first installed model
+  # timeout: 5m
+  # wake_on_lan:
+  #   mac: aa:bb:cc:dd:ee:ff
+  #   addr: 192.168.1.255:9
+  #   wait: 60s
+
+# history:
+#   limit: 40
+#   summary: true
+#   summary_model: llama3.2:latest
+# system_prompt: You are a helpful assistant ...
+# reaction: 👀
+# knowledge:                           # notes for the model: .md files in this folder
+#   dir: /config/knowledge
+#   max_chars: 8000
+
+mcp:
+  allow_write: false                    # default for servers below: false, ask or true
+  # tools: [get_snapshot]               # allowlist of tool names across all servers
+  # max_result_chars: 32000
+  servers:
+    cams:
+      url: http://go2rtc-mcp:8090/mcp
+    frigate:
+      url: http://frigate-mcp:8091/mcp
+      knowledge: frigate.md             # notes in the knowledge folder, given with these tools
+    ha:
+      url: http://homeassistant:8123/api/mcp
+      token: ${HA_TOKEN}
+      allow_write: ask                  # this server's tools that change things wait for your OK
+      knowledge: ha.md                  # must exist; without this line, ha.md is used if it's there
+      # tools: [GetLiveContext, HassTurnOn, HassTurnOff]   # only these of its tools
