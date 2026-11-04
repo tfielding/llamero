@@ -299,8 +299,14 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		model = b.opt.DefaultModel
 	}
 	if err := b.llm.Ping(ctx); err != nil {
-		if !it.Wake || b.opt.Wake == nil || !b.wakeQuietly(ctx) {
-			slog.Warn("scheduled check skipped: ollama unreachable", "id", id, "err", err)
+		switch {
+		case it.Wake && b.opt.Wake != nil && b.wakeQuietly(ctx):
+		case it.Wake && b.opt.Wake != nil:
+			b.scheduleFailed(ctx, sender, *it, "Ollama is unreachable ("+short(err)+"), and a wake-up didn't bring it online")
+			done()
+			return
+		default:
+			b.scheduleFailed(ctx, sender, *it, "Ollama is unreachable ("+short(err)+")")
 			done()
 			return
 		}
@@ -327,10 +333,20 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 	delete(b.active, sender)
 	b.mu.Unlock()
 	done()
-	if err != nil {
-		slog.Error("scheduled check failed", "id", id, "err", err)
+	switch {
+	case err != nil && callCtx.Err() != nil && ctx.Err() == nil:
+		slog.Info("scheduled check stopped", "id", id) // by /stop, which already replied
+		return
+	case err != nil && ctx.Err() != nil:
+		return // shutting down
+	case err != nil && unreachable(err):
+		b.scheduleFailed(ctx, sender, *it, "lost the connection to Ollama ("+short(err)+")")
+		return
+	case err != nil:
+		b.scheduleFailed(ctx, sender, *it, "the model returned an error ("+short(err)+")")
 		return
 	}
+	b.scheduleWorked(sender, *it)
 	answer = stripImageNotes(answer)
 	if it.OnlyIf != "" && len(images) == 0 && nothing(answer) {
 		slog.Info("scheduled check: nothing to report", "id", id, "took", time.Since(start).Round(100*time.Millisecond))
@@ -356,6 +372,45 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 			slog.Error("save history", "err", err)
 		}
 	}
+}
+
+// scheduleFailed tells the user a scheduled check couldn't run, once per run of failures: a
+// frequent check while the Ollama machine sleeps would otherwise message them every time.
+func (b *Bot) scheduleFailed(ctx context.Context, sender string, it schedule.Item, reason string) {
+	slog.Warn("scheduled check failed", "id", it.ID, "reason", reason, "already_told", it.Failing)
+	if it.Failing {
+		return
+	}
+	once := it.Next.IsZero()
+	if !once {
+		_ = b.opt.Schedules.Update(sender, func(f *schedule.File) error {
+			if cur, ok := f.Find(it.ID); ok {
+				cur.Failing = true
+			}
+			return nil
+		})
+	}
+	text := fmt.Sprintf("⏰ Schedule %d didn't run: %s.\nTask: %s", it.ID, reason, it.Task)
+	if !once {
+		text += "\nI won't repeat this until it has worked again."
+	}
+	if err := b.send(ctx, sender, response{text: text}); err != nil {
+		slog.Error("send failed", "to", mask(sender), "err", err)
+	}
+}
+
+// scheduleWorked clears the failing mark after a run that worked.
+func (b *Bot) scheduleWorked(sender string, it schedule.Item) {
+	if !it.Failing {
+		return
+	}
+	slog.Info("scheduled check works again", "id", it.ID)
+	_ = b.opt.Schedules.Update(sender, func(f *schedule.File) error {
+		if cur, ok := f.Find(it.ID); ok {
+			cur.Failing = false
+		}
+		return nil
+	})
 }
 
 // scheduledTask is the message the model gets for a scheduled run.
@@ -418,6 +473,9 @@ func (b *Bot) schedulesText(sender string, withHelp bool) string {
 		fmt.Fprintf(&sb, "%d. %s: %s\n", it.ID, b.specText(it.When), it.Task)
 		if it.OnlyIf != "" {
 			fmt.Fprintf(&sb, "   only if: %s\n", it.OnlyIf)
+		}
+		if it.Failing {
+			sb.WriteString("   last run failed\n")
 		}
 		switch {
 		case it.Paused:

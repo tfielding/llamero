@@ -27,6 +27,7 @@ type Item struct {
 	OnlyIf  string    `json:"only_if,omitempty"` // report only if this is true; empty = always report
 	Wake    bool      `json:"wake,omitempty"`    // wake the Ollama machine if it's asleep, instead of skipping
 	Paused  bool      `json:"paused,omitempty"`
+	Failing bool      `json:"failing,omitempty"` // the last run failed and the user was told; cleared when one works
 	Created time.Time `json:"created"`
 	LastRun time.Time `json:"last_run,omitzero"`
 	Next    time.Time `json:"next,omitzero"` // zero = no more runs (a one-off that's done)

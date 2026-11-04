@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows
   optional window like `between 22:00 and 06:00`), times of day on chosen days, and one-offs.
   "Only if" checks stay silent unless something's worth reporting. Scheduled runs only get
   read-only tools; creating and deleting need approval. `/schedules` lists them, with `delete`,
-  `pause`, `resume` and `run`. `SCHEDULES` (default `true`) turns them off; `TZ` sets the time zone.
+  `pause`, `resume` and `run`. A check that can't run (Ollama unreachable, or the model fails)
+  tells you which and why, once per run of failures. `SCHEDULES` (default `true`) turns them off;
+  `TZ` sets the time zone.
 - Knowledge folder (`KNOWLEDGE_DIR`, default `/config/knowledge`): Markdown notes the model always
   gets (people, cars, routines), and per-MCP-server notes (`frigate.md` for the server `frigate`)
   given only with that server's tools. Edits apply from the next message. Capped at

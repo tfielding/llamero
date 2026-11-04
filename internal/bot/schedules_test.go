@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -175,9 +176,9 @@ func TestOneOffIsRemovedAfterRunning(t *testing.T) {
 	}
 }
 
-func TestMissedAndOfflineRunsAreSkipped(t *testing.T) {
-	b, m, l, _, ss := setupSchedules(t)
-	it := addSchedule(t, ss, "every 1h", "Check the cameras", "")
+func TestMissedRunsAreSkipped(t *testing.T) {
+	b, m, _, _, ss := setupSchedules(t)
+	addSchedule(t, ss, "every 1h", "Check the cameras", "")
 	// Long overdue (the bot was down): skipped, next run moved on.
 	b.dueSchedules(b.ctx, time.Now().UTC().Add(2*time.Hour))
 	expectSilence(t, m)
@@ -185,15 +186,79 @@ func TestMissedAndOfflineRunsAreSkipped(t *testing.T) {
 	if !f.Items[0].Next.After(time.Now().Add(2*time.Hour)) || !f.Items[0].LastRun.IsZero() {
 		t.Errorf("missed run: %+v", f.Items[0])
 	}
+}
 
-	// Ollama down and no wake: skipped quietly.
-	ss.Update(me, func(f *schedule.File) error { f.Items[0].Next = time.Now().Add(-time.Minute); return nil })
+func TestFailedRunsAreReportedOnce(t *testing.T) {
+	b, m, l, _, ss := setupSchedules(t)
+	addSchedule(t, ss, "every 30m", "Is the garage door open?", "")
+	due := func(after time.Duration) {
+		ss.Update(me, func(f *schedule.File) error { f.Items[0].Next = time.Now().Add(-time.Minute); return nil })
+		b.dueSchedules(b.ctx, time.Now().UTC().Add(after))
+	}
+	l.mu.Lock()
+	l.pingErr = refused
+	l.mu.Unlock()
+
+	due(0)
+	got := reply(t, m)
+	for _, want := range []string{"Schedule 1 didn't run: Ollama is unreachable (connect: connection refused).",
+		"Task: Is the garage door open?", "I won't repeat this until it has worked again."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("message lacks %q:\n%s", want, got)
+		}
+	}
+	waitIdle(t, b)
+	if f, _ := ss.Get(me); !f.Items[0].Failing {
+		t.Fatal("not marked failing")
+	}
+	b.Handle(dm(me, "/schedules"))
+	if got := reply(t, m); !strings.Contains(got, "last run failed") {
+		t.Errorf("list: %s", got)
+	}
+
+	// Still failing: not reported again.
+	due(0)
+	expectSilence(t, m)
+	waitIdle(t, b)
+
+	// Works again: the result is sent and the mark cleared.
+	l.mu.Lock()
+	l.pingErr = nil
+	l.mu.Unlock()
+	due(0)
+	if got := reply(t, m); !strings.Contains(got, "Is the garage door open?") {
+		t.Fatalf("got: %s", got)
+	}
+	waitIdle(t, b)
+	if f, _ := ss.Get(me); f.Items[0].Failing {
+		t.Fatal("still marked failing")
+	}
+
+	// Failing again later is reported again.
+	l.mu.Lock()
+	l.chatErr = errors.New("model not found")
+	l.mu.Unlock()
+	due(0)
+	if got := reply(t, m); !strings.Contains(got, "didn't run: the model returned an error (model not found)") {
+		t.Fatalf("got: %s", got)
+	}
+}
+
+func TestFailedOneOffIsReported(t *testing.T) {
+	b, m, l, _, ss := setupSchedules(t)
+	addSchedule(t, ss, "tomorrow 9am", "Remind me to call the plumber", "")
 	l.mu.Lock()
 	l.pingErr = refused
 	l.mu.Unlock()
 	b.dueSchedules(b.ctx, time.Now().UTC())
-	expectSilence(t, m)
-	_ = it
+	got := reply(t, m)
+	if !strings.Contains(got, "Schedule 1 didn't run") || strings.Contains(got, "won't repeat") {
+		t.Fatalf("got: %s", got)
+	}
+	waitIdle(t, b)
+	if f, _ := ss.Get(me); len(f.Items) != 0 {
+		t.Fatalf("one-off kept: %+v", f.Items)
+	}
 }
 
 func TestSchedulesCommand(t *testing.T) {

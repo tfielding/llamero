@@ -279,10 +279,12 @@ with ⏰. It joins the conversation, so you can follow up ("show me that one").
   The check then stays silent unless the condition is true.
 - **Look, don't touch:** scheduled checks only get read-only tools. Nobody is there to approve an
   action, so a check can report that the garage door is open, but never close it.
-- **Ollama asleep or down:** the check is skipped (and logged), unless the schedule was created
-  with `wake`, which wakes the machine quietly first. A check that's overdue by more than 10
-  minutes, e.g. because the bot was down, is skipped rather than run late. Frequent checks keep
-  the Ollama machine awake.
+- **When a check can't run** (Ollama unreachable, or the model fails), you get a message saying
+  which schedule and why. A repeating check reports only the first failure in a row, so a check
+  every 30 minutes doesn't message you all night; `/schedules` shows "last run failed" until one
+  works again. A schedule created with `wake` wakes the Ollama machine quietly first.
+- A check that's overdue by more than 10 minutes, e.g. because the bot was down, is skipped rather
+  than run late. Frequent checks keep the Ollama machine awake.
 - **Managing them:** ask ("delete the porch check") or use `/schedules`, `/schedules pause 2`,
   `resume`, `delete`, or `run` (run now, even if paused). Up to 20 per chat; saved in
   `data/schedules`.
