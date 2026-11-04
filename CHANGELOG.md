@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `GET /healthz` on port 8092 (`HEALTH_ADDR`, `off` to disable): 200 while the bot is connected to
+  signal-cli-rest-api, 503 when it isn't, with Ollama and MCP servers reported in the body. No
+  addresses or secrets in it. `signal-ollama -healthcheck` for a Docker `HEALTHCHECK` (the image
+  has no curl). The Signal connection is now pinged every 30 seconds, so one that died quietly is
+  reconnected within a minute instead of never.
 - Scheduled checks: ask "every weekday at 7:30 tell me what happened overnight on the cameras" or
   "remind me at 5pm to …", approve, and the result arrives on time. Repeats (`every 30m`, with an
   optional window like `between 22:00 and 06:00`), times of day on chosen days, and one-offs.

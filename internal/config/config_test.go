@@ -409,3 +409,30 @@ func TestSchedulesSetting(t *testing.T) {
 		t.Fatalf("bad value: %v", err)
 	}
 }
+
+func TestHealthAddr(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	for in, want := range map[string]string{"": ":8092", ":9000": ":9000", "127.0.0.1:8092": "127.0.0.1:8092", "OFF": "", "none": ""} {
+		t.Setenv("HEALTH_ADDR", in)
+		c, err := Load()
+		if err != nil || c.HealthAddr != want {
+			t.Errorf("HEALTH_ADDR=%q: %q %v", in, c.HealthAddr, err)
+		}
+	}
+	t.Setenv("HEALTH_ADDR", "")
+	if c, _ := Load(); !strings.Contains(c.Describe(), "HEALTH_ADDR: :8092\n") {
+		t.Error("describe lacks HEALTH_ADDR")
+	}
+	for _, bad := range []string{"8092", ":0", ":99999", "localhost", ":http"} {
+		t.Setenv("HEALTH_ADDR", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HEALTH_ADDR must be [host]:port like :8092, or off") {
+			t.Errorf("HEALTH_ADDR=%q: %v", bad, err)
+		}
+	}
+	t.Setenv("HEALTH_ADDR", "")
+	writeConfig(t, "health:\n  addr: off\n")
+	if c, err := Load(); err != nil || c.HealthAddr != "" {
+		t.Errorf("health.addr: off: %q %v", c.HealthAddr, err)
+	}
+}

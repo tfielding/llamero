@@ -49,7 +49,8 @@ type Config struct {
 	MCPWrite    toolbox.Write    // default for servers without their own allow_write
 	MCPMaxChars int              // cap on tool output given to the model
 
-	Schedules bool // scheduled checks (create_schedule tool, /schedules)
+	Schedules  bool   // scheduled checks (create_schedule tool, /schedules)
+	HealthAddr string // where GET /healthz listens, e.g. ":8092"; empty = off
 
 	KnowledgeDir      string // folder of Markdown notes for the model (see package knowledge)
 	KnowledgeMaxChars int    // cap on what those notes add to the prompt
@@ -134,6 +135,15 @@ func Load() (Config, error) {
 		if t = strings.TrimSpace(t); t != "" {
 			c.MCPTools[t] = true
 		}
+	}
+	switch v := s.get("HEALTH_ADDR", ":8092"); strings.ToLower(v) {
+	case "off", "none", "false":
+	default:
+		host, port, err := net.SplitHostPort(v)
+		if n, perr := strconv.Atoi(port); err != nil || perr != nil || n < 1 || n > 65535 {
+			return c, fmt.Errorf("%s must be [host]:port like :8092, or off", s.name("HEALTH_ADDR"))
+		}
+		c.HealthAddr = net.JoinHostPort(host, port)
 	}
 	if c.Schedules, err = strconv.ParseBool(s.get("SCHEDULES", "true")); err != nil {
 		return c, fmt.Errorf("%s must be true or false", s.name("SCHEDULES"))
@@ -348,6 +358,11 @@ func (c Config) Describe() string {
 	line("REACTION", reaction)
 	line("DATA_DIR", c.DataDir)
 	line("SCHEDULES", c.Schedules)
+	health := c.HealthAddr
+	if health == "" {
+		health = "off"
+	}
+	line("HEALTH_ADDR", health)
 	line("TZ", time.Local.String())
 	line("KNOWLEDGE_DIR", c.KnowledgeDir)
 	line("KNOWLEDGE_MAX_CHARS", c.KnowledgeMaxChars)

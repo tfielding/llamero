@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -59,10 +60,36 @@ type Client struct {
 	base   string
 	number string
 	http   *http.Client
+
+	pingEvery   time.Duration // how often to check the receive websocket is still alive
+	pingTimeout time.Duration
+
+	mu        sync.Mutex
+	connected bool
+	since     time.Time // when the current connection was made
+	lastErr   error     // why the last connection ended (or failed)
 }
 
 func New(baseURL, number string) *Client {
-	return &Client{base: baseURL, number: number, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{base: baseURL, number: number, http: &http.Client{Timeout: 30 * time.Second},
+		pingEvery: 30 * time.Second, pingTimeout: 10 * time.Second}
+}
+
+// Status reports whether the receive websocket is connected, since when, and why the last
+// connection ended or failed.
+func (c *Client) Status() (connected bool, since time.Time, lastErr error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected, c.since, c.lastErr
+}
+
+func (c *Client) setStatus(connected bool, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.connected, c.lastErr = connected, err
+	if connected {
+		c.since = time.Now()
+	}
 }
 
 // Listen connects to the receive websocket and calls handle for every envelope.
@@ -85,7 +112,8 @@ func (c *Client) Listen(ctx context.Context, handle func(context.Context, Envelo
 	}
 }
 
-func (c *Client) listenOnce(ctx context.Context, wsURL string, handle func(context.Context, Envelope), connected func()) error {
+func (c *Client) listenOnce(ctx context.Context, wsURL string, handle func(context.Context, Envelope), connected func()) (err error) {
+	defer func() { c.setStatus(false, err) }()
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		return err
@@ -93,7 +121,32 @@ func (c *Client) listenOnce(ctx context.Context, wsURL string, handle func(conte
 	defer conn.CloseNow()
 	conn.SetReadLimit(4 << 20)
 	slog.Info("connected to signal", "url", wsURL)
+	c.setStatus(true, nil)
 	connected()
+
+	// A connection can die without either side noticing (e.g. after a network blip), leaving
+	// Read waiting forever. Pinging finds that out, and closing makes Read return so we reconnect.
+	pingCtx, stopPing := context.WithCancel(ctx)
+	defer stopPing()
+	go func() {
+		t := time.NewTicker(c.pingEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-t.C:
+			}
+			pctx, cancel := context.WithTimeout(pingCtx, c.pingTimeout)
+			err := conn.Ping(pctx)
+			cancel()
+			if err != nil && pingCtx.Err() == nil {
+				slog.Warn("signal websocket not answering pings, reconnecting", "err", err)
+				conn.CloseNow()
+				return
+			}
+		}
+	}()
 
 	for {
 		_, data, err := conn.Read(ctx)

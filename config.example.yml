@@ -24,6 +24,8 @@ ollama:
 #   summary_model: llama3.2:latest
 # system_prompt: You are a helpful assistant ...
 # reaction: 👀
+# health:
+#   addr: ":8092"                       # GET /healthz for Docker and monitoring; off to disable
 # schedules:
 #   enabled: true                       # scheduled checks: ask "every weekday at 7:30 tell me ..."
 # knowledge:                           # notes for the model: .md files in this folder

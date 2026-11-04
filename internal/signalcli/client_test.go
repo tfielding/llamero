@@ -3,9 +3,13 @@ package signalcli
 import (
 	"context"
 	"encoding/json"
+	"github.com/coder/websocket"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseQuote(t *testing.T) {
@@ -54,4 +58,73 @@ func TestReact(t *testing.T) {
 	if b["recipient"] != "+15550000001" || b["target_author"] != "+15550000001" || b["reaction"] != "👀" || b["timestamp"] != float64(1730000000500) {
 		t.Fatalf("body: %v", b)
 	}
+}
+
+// waitFor polls cond until it's true or a second has passed.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestStatusFollowsTheConnection(t *testing.T) {
+	var mu sync.Mutex
+	var conns []*websocket.Conn
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		mu.Lock()
+		conns = append(conns, conn)
+		mu.Unlock()
+		conn.Read(r.Context()) // answers pings until the connection closes
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "+15550000009")
+	if ok, _, _ := c.Status(); ok {
+		t.Fatal("connected before Listen")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Listen(ctx, func(context.Context, Envelope) {})
+	waitFor(t, "connected", func() bool { ok, since, _ := c.Status(); return ok && !since.IsZero() })
+
+	// The server drops the connection: not connected, with the reason; then it reconnects.
+	mu.Lock()
+	conns[0].Close(websocket.StatusGoingAway, "restarting")
+	mu.Unlock()
+	waitFor(t, "disconnected", func() bool { ok, _, err := c.Status(); return !ok && err != nil })
+	waitFor(t, "reconnected", func() bool { ok, _, _ := c.Status(); return ok })
+}
+
+func TestDeadConnectionIsNoticed(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	var accepted atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := websocket.Accept(w, r, nil); err != nil {
+			return
+		}
+		accepted.Add(1)
+		<-block // never reads, so pings go unanswered: like a connection that died silently
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "+15550000009")
+	c.pingEvery, c.pingTimeout = 20*time.Millisecond, 50*time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go c.Listen(ctx, func(context.Context, Envelope) {})
+	waitFor(t, "connected", func() bool { ok, _, _ := c.Status(); return ok })
+	waitFor(t, "dead connection noticed", func() bool { ok, _, err := c.Status(); return !ok && err != nil })
+	// Backoff starts at 1s before reconnecting.
+	waitFor(t, "a new connection", func() bool { return accepted.Load() >= 2 })
 }

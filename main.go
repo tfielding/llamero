@@ -6,7 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/tfielding/signal-ollama/internal/bot"
 	"github.com/tfielding/signal-ollama/internal/config"
+	"github.com/tfielding/signal-ollama/internal/health"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/schedule"
@@ -30,13 +34,17 @@ var version = "dev"
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	healthcheck := flag.Bool("healthcheck", false, "check the running bot's /healthz and exit 0 if it's healthy (for Docker)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: signal-ollama [-version]\n\nConfigured with environment variables; see the README.\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: signal-ollama [-version] [-healthcheck]\n\nConfigured with environment variables and /config/config.yml; see the README.\n")
 	}
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("signal-ollama", version)
 		return
+	}
+	if *healthcheck {
+		os.Exit(checkHealth())
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
@@ -57,6 +65,17 @@ func run() error {
 	if cfg.WakeMAC != nil {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
+	sc := signalcli.New(cfg.SignalURL, cfg.SignalNumber)
+	var box *toolbox.Box
+	if len(cfg.MCPServers) > 0 {
+		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
+		defer box.Close()
+	}
+	// Before waiting for Ollama below, so the bot reports itself as starting, not missing.
+	if err := serveHealth(ctx, cfg, sc, llm, box); err != nil {
+		return err
+	}
+
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel, err = firstModel(ctx, llm, wake, 10*time.Second)
 		if err != nil {
@@ -68,11 +87,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	sc := signalcli.New(cfg.SignalURL, cfg.SignalNumber)
 	var tools bot.Tools
-	if len(cfg.MCPServers) > 0 {
-		box := toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
-		defer box.Close()
+	if box != nil {
 		names := []string{}
 		for _, t := range box.Tools(ctx) {
 			names = append(names, t.Name)
@@ -148,4 +164,84 @@ func firstModel(ctx context.Context, llm interface {
 		case <-time.After(retry):
 		}
 	}
+}
+
+// serveHealth starts GET /healthz on cfg.HealthAddr (unless it's off) until ctx ends. A port
+// that can't be opened is an error at startup.
+func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, llm *ollama.Client, box *toolbox.Box) error {
+	if cfg.HealthAddr == "" {
+		return nil
+	}
+	checks := health.Checks{Version: version, Started: time.Now(), Signal: sc.Status, Ollama: llm.Ping}
+	if box != nil {
+		checks.MCP = func() map[string]error {
+			errs := box.Errors()
+			out := map[string]error{}
+			for _, s := range cfg.MCPServers {
+				out[s.Name] = errs[s.Name]
+			}
+			return out
+		}
+	}
+	ln, err := net.Listen("tcp", cfg.HealthAddr)
+	if err != nil {
+		return fmt.Errorf("HEALTH_ADDR %s: %w", cfg.HealthAddr, err)
+	}
+	srv := &http.Server{Handler: health.Handler(checks), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdown)
+	}()
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("health endpoint stopped", "err", err)
+		}
+	}()
+	slog.Info("health endpoint", "addr", cfg.HealthAddr)
+	return nil
+}
+
+// checkHealth asks the running bot's /healthz (for a Docker HEALTHCHECK, since the image has no
+// curl) and returns the exit code: 0 healthy, 1 not.
+func checkHealth() int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "unhealthy:", err)
+		return 1
+	}
+	if cfg.HealthAddr == "" {
+		fmt.Fprintln(os.Stderr, "unhealthy: HEALTH_ADDR is off")
+		return 1
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get("http://" + localAddr(cfg.HealthAddr) + "/healthz")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "unhealthy:", err)
+		return 1
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	fmt.Print(string(body))
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
+}
+
+// localAddr is where to reach a listen address from the same machine: ":8092" and
+// "0.0.0.0:8092" become "127.0.0.1:8092".
+func localAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return net.JoinHostPort(host, port)
 }

@@ -51,3 +51,12 @@ func TestFirstModelWithoutWake(t *testing.T) {
 		t.Fatalf("err = %v, want deadline exceeded", err)
 	}
 }
+
+func TestLocalAddr(t *testing.T) {
+	for in, want := range map[string]string{":8092": "127.0.0.1:8092", "0.0.0.0:8092": "127.0.0.1:8092",
+		"[::]:8092": "[::1]:8092", "10.0.0.5:8092": "10.0.0.5:8092"} {
+		if got := localAddr(in); got != want {
+			t.Errorf("localAddr(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

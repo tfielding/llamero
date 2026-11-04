@@ -49,6 +49,9 @@ type fileConfig struct {
 	Schedules    struct {
 		Enabled string `yaml:"enabled"`
 	} `yaml:"schedules"`
+	Health struct {
+		Addr string `yaml:"addr"`
+	} `yaml:"health"`
 	Knowledge struct {
 		Dir      string `yaml:"dir"`
 		MaxChars string `yaml:"max_chars"`
@@ -87,6 +90,7 @@ var fileKeys = map[string]string{
 	"REACTION":             "reaction",
 	"DATA_DIR":             "data_dir",
 	"SCHEDULES":            "schedules.enabled",
+	"HEALTH_ADDR":          "health.addr",
 	"KNOWLEDGE_DIR":        "knowledge.dir",
 	"KNOWLEDGE_MAX_CHARS":  "knowledge.max_chars",
 	"MCP_ALLOW_WRITE":      "mcp.allow_write",
@@ -162,6 +166,7 @@ func loadFile(path string) (file, error) {
 		"REACTION":             fc.Reaction,
 		"DATA_DIR":             fc.DataDir,
 		"SCHEDULES":            fc.Schedules.Enabled,
+		"HEALTH_ADDR":          fc.Health.Addr,
 		"KNOWLEDGE_DIR":        fc.Knowledge.Dir,
 		"KNOWLEDGE_MAX_CHARS":  fc.Knowledge.MaxChars,
 		"MCP_ALLOW_WRITE":      fc.MCP.AllowWrite,

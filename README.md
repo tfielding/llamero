@@ -105,6 +105,11 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
     volumes:
       - /opt/signal-ollama/config:/config:ro
       - /opt/signal-ollama/data:/data
+    healthcheck:                # optional: see Health
+      test: ["CMD", "/signal-ollama", "-healthcheck"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
     depends_on:
       - signal-cli-rest-api
 ```
@@ -185,6 +190,7 @@ Settings come from an optional config file, environment variables, or both.
 | | `mcp.servers.<name>.knowledge` | `<name>.md` if present | The server's notes file in the [knowledge folder](#knowledge); must exist |
 | `MCP_TOOLS` | `mcp.tools` | all | Only these tools, across all servers |
 | `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
+| `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
 | `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
@@ -317,6 +323,37 @@ answers as usual. `/stop` cancels the wait; `/wake` sends a wake-up on demand.
   `192.168.1.255:9`), or use `network_mode: host`.
 - Without `OLLAMA_MODEL`, the bot needs Ollama at startup to pick a model; it sends a wake-up then
   too, and every 5 minutes while it waits.
+
+## Health
+
+`GET /healthz` on port 8092 says whether the bot is working, for Docker, Uptime Kuma or Home
+Assistant:
+
+```json
+{
+  "status": "ok",
+  "version": "1.3.0",
+  "uptime": "26h4m10s",
+  "signal": { "connected": true, "since": "2026-11-04T09:00:00Z" },
+  "ollama": { "reachable": false, "error": "connection refused" },
+  "mcp": { "frigate": "ok", "ha": "unavailable (timed out)" }
+}
+```
+
+- **200** when the bot can receive messages (connected to signal-cli-rest-api), **503** when it
+  can't. That's the one to alert on.
+- Ollama and MCP servers are reported but don't make it unhealthy: with Wake-on-LAN a sleeping
+  Ollama is normal. To be alerted about Ollama too, have your monitor look for
+  `"reachable": true` in the body.
+- The connection to signal-cli-rest-api is checked with a ping every 30 seconds, so one that died
+  quietly is noticed (and reconnected) within a minute.
+- **Docker:** the image has no curl, so `signal-ollama -healthcheck` checks its own endpoint and
+  exits 0 or 1; see the `healthcheck:` in [Run](#run). `docker ps` then shows the container as
+  healthy or unhealthy.
+- **Uptime Kuma** on the same Docker network: an HTTP monitor on
+  `http://signal-ollama:8092/healthz`. No need to publish the port otherwise.
+- The report has no phone numbers, tokens, URLs or addresses; errors are cut to their cause
+  ("connection refused", "timed out"), with the details in the bot's log.
 
 ## Safety
 
