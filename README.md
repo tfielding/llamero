@@ -48,13 +48,14 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
 | `/knowledge` | Which notes are loaded from the knowledge folder, and when each is used |
 | `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
+| `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
 | `/learned` | What [hooks](#hooks) learned from your feedback on 🔔 messages |
 | `/learned clear <hook>` | Forget what one hook learned |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
 | `/wake` | Wake the Ollama machine (Wake-on-LAN) |
 | `/help` | This list |
 
-`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/learned` and `/settings` answer
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/hooks`, `/learned` and `/settings` answer
 right away, even while a reply is being written.
 
 ## What it answers
@@ -199,7 +200,7 @@ Settings come from an optional config file, environment variables, or both.
 | `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
 | `WEBHOOK_TOKEN` | `webhooks.token` | none | Token [hook](#hooks) callers send as `Authorization: Bearer <token>`; at least 16 characters, required with hooks |
-| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group` |
+| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group`, `cooldown` |
 | `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
 | `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
@@ -359,6 +360,8 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
   **503** still starting up.
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
+- `/hooks` shows the latest checks and what each decided, including the model's reason for
+  "nothing to report", which helps when tuning `task` and `only_if`.
 
 **Learning from your feedback:** when a 🔔 message is wrong, say so, e.g. by replying to it with
 "false alarm, that's the plant". The model saves your verdict with the event and its own answer, and

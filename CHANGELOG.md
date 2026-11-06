@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 - Hook `cooldown`: after a message, the hook skips events with the same `key` (e.g. a camera, sent as
   `"key"` in the JSON or `?key=`) for that long, without asking the model. Only a sent message starts
   it.
+- `/hooks`: the latest hook checks (up to 20 since the bot started) and what each decided: sent,
+  nothing to report with the model's reason, sent unchecked and why, or skipped while cooling down.
 
 ### Fixed
 - When the model uses tools and then writes nothing, it's asked once more for an answer before the

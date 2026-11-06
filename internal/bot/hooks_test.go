@@ -317,3 +317,36 @@ func TestHookCooldown(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestHooksCommand(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check.", OnlyIf: "a person", Cooldown: time.Minute})
+	b.Handle(dm(me, "/hooks"))
+	if got := reply(t, m); got != "No hook events since the bot started." {
+		t.Errorf("empty: %q", got)
+	}
+	l.answer = "NOTHING_TO_REPORT. Only a car passing on the street."
+	b.Hook(b.ctx, "cams", "car on laneway_south", "laneway_south")
+	expectSilence(t, m)
+	l.mu.Lock()
+	l.answer = "Someone is at the door."
+	l.mu.Unlock()
+	b.Hook(b.ctx, "cams", "person on front_door", "front_door")
+	reply(t, m)
+	b.Hook(b.ctx, "cams", "person on front_door again", "front_door")
+
+	b.Handle(dm(me, "/hooks"))
+	got := reply(t, m)
+	for _, want := range []string{
+		"Latest hook checks, newest first:\n",
+		"cams [front_door]: skipped: cooling down for 1m0s\n  person on front_door again\n",
+		"cams [front_door]: sent\n  person on front_door\n",
+		"cams [laneway_south]: nothing to report (Only a car passing on the street)\n  car on laneway_south\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "skipped") > strings.Index(got, "nothing to report") {
+		t.Errorf("not newest first:\n%s", got)
+	}
+}
