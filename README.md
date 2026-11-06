@@ -327,7 +327,9 @@ webhooks:
       group: 0
 ```
 
-An event is a short text, as JSON `{"text": "..."}` or a plain-text body:
+An event is a short text, as JSON `{"text": "..."}` or a plain-text body. It can also have a `key`
+saying what it's about, e.g. a camera or a sensor (`"key": "..."` in the JSON, or `?key=` in the URL),
+for the cooldown:
 
 ```bash
 curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/json' \
@@ -345,6 +347,11 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
 - **`group`:** events within this long of the first are checked together in one run (default
   `30s`, at most `10m`, `0` for each on its own), so one person walking past three cameras is one
   message. Up to 10 events are listed per run; more are counted.
+- **`cooldown`:** after a message, skip the hook's events with the same `key` for this long (e.g.
+  `5m`, at most `24h`; default off), so someone lingering in front of one camera is one message,
+  not five. Skipped events aren't checked, so they cost no model time; events with another key
+  (another camera) still are. Only a sent message starts a cooldown, not a check that found nothing.
+  The catch: a second, different arrival on the same key within the cooldown isn't reported.
 - **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
   it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
   than nothing.
@@ -372,7 +379,7 @@ rest_command:
     headers:
       Authorization: !secret signal_ollama_hook_auth   # "Bearer <token>" in secrets.yaml
     content_type: application/json
-    payload: '{"text": {{ text | tojson }}}'
+    payload: '{"text": {{ text | tojson }}, "key": {{ key | default("") | tojson }}}'
 ```
 
 ```yaml
@@ -381,6 +388,7 @@ rest_command:
   data:
     hook: front_door
     text: "{{ trigger.to_state.name }} opened"
+    key: "{{ trigger.entity_id }}"                  # optional, for the cooldown
 ```
 
 ## Photos

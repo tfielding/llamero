@@ -78,6 +78,7 @@ type Bot struct {
 	scheduled map[string]bool         // scheduled runs waiting or running, by "chat#id"
 	hookRuns  map[string]*hookRun     // hook events waiting for their run, by hook
 	lastHook  map[string]hookResult   // each hook's last checked run, for feedback on it
+	cooldowns map[string]time.Time    // until when each hook (and key) skips events, after a message
 	learnMu   sync.Mutex              // guards the learned files
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
@@ -116,7 +117,7 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
-		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, lastHook: map[string]hookResult{}}
+		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, lastHook: map[string]hookResult{}, cooldowns: map[string]time.Time{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.

@@ -20,9 +20,11 @@ const MaxBody = 16 << 10
 var ErrUnknownHook = errors.New("unknown hook")
 
 // Handler serves POST /hooks/{name}. Requests need "Authorization: Bearer <token>". The body is
-// the event: JSON {"text": "..."}, or plain text. deliver takes the event: ErrUnknownHook for a
-// hook that isn't configured, any other error while the bot can't take events (starting up).
-func Handler(token string, deliver func(name, text string) error) http.Handler {
+// the event: JSON {"text": "...", "key": "..."}, or plain text with ?key=... The optional key says
+// what the event is about (e.g. a camera), for the hook's cooldown. deliver takes the event:
+// ErrUnknownHook for a hook that isn't configured, any other error while the bot can't take events
+// (starting up).
+func Handler(token string, deliver func(name, text, key string) error) http.Handler {
 	want := []byte("Bearer " + token)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /hooks/{name}", func(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +33,7 @@ func Handler(token string, deliver func(name, text string) error) http.Handler {
 			reply(w, http.StatusUnauthorized, "unauthorized: send Authorization: Bearer <token>")
 			return
 		}
-		text, err := readText(w, r)
+		text, key, err := readEvent(w, r)
 		var tooBig *http.MaxBytesError
 		switch {
 		case errors.As(err, &tooBig):
@@ -44,7 +46,7 @@ func Handler(token string, deliver func(name, text string) error) http.Handler {
 			reply(w, http.StatusBadRequest, `empty event: send {"text": "..."} or plain text`)
 			return
 		}
-		switch err := deliver(r.PathValue("name"), text); {
+		switch err := deliver(r.PathValue("name"), text, key); {
 		case errors.Is(err, ErrUnknownHook):
 			reply(w, http.StatusNotFound, "no hook named "+r.PathValue("name"))
 			return
@@ -57,27 +59,33 @@ func Handler(token string, deliver func(name, text string) error) http.Handler {
 	return mux
 }
 
-// readText gets the event text from a JSON body's "text" (or "message"), or a plain body.
-func readText(w http.ResponseWriter, r *http.Request) (string, error) {
+// readEvent gets the event text from a JSON body's "text" (or "message"), or a plain body, and its
+// key from "key" in the JSON or ?key= in the URL.
+func readEvent(w http.ResponseWriter, r *http.Request) (text, key string, err error) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBody))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	key = r.URL.Query().Get("key")
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if ct != "application/json" {
-		return string(body), nil
+		return string(body), key, nil
 	}
 	var v struct {
 		Text    string `json:"text"`
 		Message string `json:"message"`
+		Key     string `json:"key"`
 	}
 	if err := json.Unmarshal(body, &v); err != nil {
-		return "", errors.New(`invalid JSON: send {"text": "..."}`)
+		return "", "", errors.New(`invalid JSON: send {"text": "..."}`)
 	}
 	if v.Text == "" {
 		v.Text = v.Message
 	}
-	return v.Text, nil
+	if v.Key != "" {
+		key = v.Key
+	}
+	return v.Text, key, nil
 }
 
 func reply(w http.ResponseWriter, code int, status string) {

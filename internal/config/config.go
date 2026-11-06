@@ -62,17 +62,19 @@ type Config struct {
 
 // Hook is one hook: what to do with events sent to POST /hooks/<Name>.
 type Hook struct {
-	Name   string
-	Task   string        // what the model does with the events; empty = send them on unchanged
-	OnlyIf string        // report only when this is true
-	To     []string      // who gets the result; empty = everyone allowed
-	Wake   bool          // wake the Ollama machine if it's asleep
-	Group  time.Duration // events this soon after the first are handled together
+	Name     string
+	Task     string        // what the model does with the events; empty = send them on unchanged
+	OnlyIf   string        // report only when this is true
+	To       []string      // who gets the result; empty = everyone allowed
+	Wake     bool          // wake the Ollama machine if it's asleep
+	Group    time.Duration // events this soon after the first are handled together
+	Cooldown time.Duration // after a message, events (with the same key) are skipped for this long; 0 = off
 }
 
 const (
 	defaultHookGroup = 30 * time.Second
 	maxHookGroup     = 10 * time.Minute
+	maxHookCooldown  = 24 * time.Hour
 	minWebhookToken  = 16
 )
 
@@ -225,6 +227,13 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 			if h.Wake && c.WakeMAC == nil {
 				return nil, fmt.Errorf("%s: wake needs Wake-on-LAN (ollama.wake_on_lan.mac)", where)
 			}
+		}
+		if v := strings.TrimSpace(fh.Cooldown); v != "" && v != "0" {
+			d, err := time.ParseDuration(v)
+			if err != nil || d < 0 || d > maxHookCooldown {
+				return nil, fmt.Errorf("%s: cooldown must be a duration from 0 to 24h, like 5m", where)
+			}
+			h.Cooldown = d
 		}
 		if v := strings.TrimSpace(fh.Group); v != "" {
 			d, err := time.ParseDuration(v)
@@ -531,6 +540,9 @@ func (c Config) Describe() string {
 			parts = append(parts, "wakes Ollama")
 		}
 		parts = append(parts, "group "+h.Group.String())
+		if h.Cooldown > 0 {
+			parts = append(parts, "cooldown "+h.Cooldown.String())
+		}
 		line("HOOK", "/hooks/"+h.Name+" ("+strings.Join(parts, "; ")+")")
 	}
 	return strings.TrimSuffix(sb.String(), "\n")

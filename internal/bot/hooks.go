@@ -15,12 +15,13 @@ import (
 
 // Hook is one configured hook.
 type Hook struct {
-	Name   string
-	Task   string        // what the model does with the events; empty = send them on unchanged
-	OnlyIf string        // report only when this is true; empty = always report
-	To     []string      // who gets the result; empty = everyone allowed
-	Wake   bool          // wake the Ollama machine if it's asleep, instead of sending the events unchecked
-	Group  time.Duration // events within this long of the first are handled together
+	Name     string
+	Task     string        // what the model does with the events; empty = send them on unchanged
+	OnlyIf   string        // report only when this is true; empty = always report
+	To       []string      // who gets the result; empty = everyone allowed
+	Wake     bool          // wake the Ollama machine if it's asleep, instead of sending the events unchecked
+	Group    time.Duration // events within this long of the first are handled together
+	Cooldown time.Duration // after a message, events with the same key are skipped for this long; 0 = off
 }
 
 const (
@@ -32,16 +33,26 @@ const (
 type hookRun struct {
 	name    string
 	events  []string
-	dropped int // events past maxHookEvents
+	dropped int             // events past maxHookEvents
+	keys    map[string]bool // the events' keys (e.g. a camera), for the cooldown; "" = no key
 }
 
 // Hook takes an event for the hook called name, and reports false if there's no such hook. The
-// event is handled after the hook's grouping window, together with any others that arrive in it.
-// ctx is the bot's, not the request's: the run outlives the request.
-func (b *Bot) Hook(ctx context.Context, name, text string) bool {
+// event is handled after the hook's grouping window, together with any others that arrive in it,
+// unless the hook is cooling down for key (e.g. the camera) after a message. ctx is the bot's,
+// not the request's: the run outlives the request.
+func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	h, ok := b.opt.Hooks[name]
 	if !ok {
 		return false
+	}
+	key = strings.TrimSpace(key)
+	b.mu.Lock()
+	until := b.cooldowns[name+"\x00"+key]
+	b.mu.Unlock()
+	if time.Now().Before(until) {
+		slog.Info("hook event skipped: cooling down", "hook", name, "key", key, "for", time.Until(until).Round(time.Second))
+		return true
 	}
 	if r := []rune(strings.TrimSpace(text)); len(r) > maxHookEventChars {
 		text = string(r[:maxHookEventChars]) + "…"
@@ -49,9 +60,10 @@ func (b *Bot) Hook(ctx context.Context, name, text string) bool {
 	b.mu.Lock()
 	run, waiting := b.hookRuns[name]
 	if !waiting {
-		run = &hookRun{name: name}
+		run = &hookRun{name: name, keys: map[string]bool{}}
 		b.hookRuns[name] = run
 	}
+	run.keys[key] = true
 	if len(run.events) < maxHookEvents {
 		run.events = append(run.events, strings.TrimSpace(text))
 	} else {
@@ -107,13 +119,13 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	start := time.Now()
 	events := eventList(run)
 	if h.Task == "" {
-		b.sendHook(ctx, to, response{text: fmt.Sprintf("🔔 %s\n\n%s", h.Name, events)})
+		b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 %s\n\n%s", h.Name, events)})
 		slog.Info("hook events sent on", "hook", h.Name, "events", len(run.events)+run.dropped)
 		return
 	}
 	unchecked := func(why string) {
 		slog.Warn("hook events sent unchecked", "hook", h.Name, "reason", why)
-		b.sendHook(ctx, to, response{text: fmt.Sprintf("🔔 %s (not checked: %s)\n\n%s", h.Name, why, events)})
+		b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 %s (not checked: %s)\n\n%s", h.Name, why, events)})
 	}
 	if err := b.llm.Ping(ctx); err != nil {
 		switch {
@@ -148,7 +160,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		slog.Info("hook check: nothing to report", "hook", h.Name, "took", time.Since(start).Round(100*time.Millisecond))
 		return
 	}
-	b.sendHook(ctx, to, response{text: fmt.Sprintf("🔔 **%s**\n\n%s", h.Name, answer), fromModel: true, images: images})
+	b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 **%s**\n\n%s", h.Name, answer), fromModel: true, images: images})
 	b.mu.Lock()
 	b.lastHook[h.Name] = hookResult{events: events, answer: answer} // what "that was a false alarm" refers to
 	b.mu.Unlock()
@@ -158,7 +170,21 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	}
 }
 
-func (b *Bot) sendHook(ctx context.Context, to []string, r response) {
+// sendHook sends a hook's message, and starts its cooldown for the keys of the events in it.
+func (b *Bot) sendHook(ctx context.Context, h Hook, run *hookRun, to []string, r response) {
+	if h.Cooldown > 0 {
+		until := time.Now().Add(h.Cooldown)
+		b.mu.Lock()
+		for k, t := range b.cooldowns {
+			if time.Now().After(t) {
+				delete(b.cooldowns, k)
+			}
+		}
+		for key := range run.keys {
+			b.cooldowns[h.Name+"\x00"+key] = until
+		}
+		b.mu.Unlock()
+	}
 	for _, recipient := range to {
 		if err := b.send(ctx, recipient, r); err != nil {
 			slog.Error("send failed", "to", mask(recipient), "err", err)

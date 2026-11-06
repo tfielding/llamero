@@ -465,6 +465,7 @@ func TestWebhookConfig(t *testing.T) {
       to: ["+15550000001"]
       wake: true
       group: 1m
+      cooldown: 5m
     leak:
       group: 0
 `)
@@ -478,7 +479,7 @@ func TestWebhookConfig(t *testing.T) {
 	}
 	cam, leak := c.Hooks[0], c.Hooks[1]
 	if cam.Name != "camera_alert" || cam.Task != "Look at the alert and say what happened." || cam.OnlyIf != "a person is at the door at night" ||
-		len(cam.To) != 1 || cam.To[0] != "+15550000001" || !cam.Wake || cam.Group != time.Minute {
+		len(cam.To) != 1 || cam.To[0] != "+15550000001" || !cam.Wake || cam.Group != time.Minute || cam.Cooldown != 5*time.Minute {
 		t.Errorf("camera_alert: %+v", cam)
 	}
 	if leak.Name != "leak" || leak.Task != "" || leak.Group != 0 || leak.Wake || len(leak.To) != 0 {
@@ -486,7 +487,7 @@ func TestWebhookConfig(t *testing.T) {
 	}
 	d := c.Describe()
 	for _, want := range []string{"WEBHOOK_TOKEN: set\n",
-		"HOOK: /hooks/camera_alert (task: Look at the alert and say what happened.; only if: a person is at the door at night; to …0001; wakes Ollama; group 1m0s)",
+		"HOOK: /hooks/camera_alert (task: Look at the alert and say what happened.; only if: a person is at the door at night; to …0001; wakes Ollama; group 1m0s; cooldown 5m0s)",
 		"HOOK: /hooks/leak (sends events on unchecked; group 0s)"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("settings lack %q:\n%s", want, d)
@@ -505,15 +506,16 @@ func TestWebhookConfig(t *testing.T) {
 	t.Setenv("WEBHOOK_TOKEN", "")
 
 	for name, tc := range map[string]struct{ yml, want string }{
-		"no token":    {"webhooks:\n  hooks:\n    door: {}\n", "webhooks.token in "},
-		"short token": {"webhooks:\n  token: short\n  hooks:\n    door: {}\n", "must be at least 16 characters"},
-		"bad name":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
-		"only_if":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
-		"stranger":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in signal.allowed_senders"},
-		"bad wake":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
-		"bad group":   {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
-		"health off":  {"health: {addr: \"off\"}\nwebhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {}\n", "which is off"},
-		"unknown key": {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {tsk: x}\n", `unknown setting "tsk"`},
+		"no token":     {"webhooks:\n  hooks:\n    door: {}\n", "webhooks.token in "},
+		"short token":  {"webhooks:\n  token: short\n  hooks:\n    door: {}\n", "must be at least 16 characters"},
+		"bad name":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
+		"only_if":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
+		"stranger":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in signal.allowed_senders"},
+		"bad wake":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
+		"bad cooldown": {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {cooldown: 2d}\n", "cooldown must be a duration from 0 to 24h"},
+		"bad group":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
+		"health off":   {"health: {addr: \"off\"}\nwebhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {}\n", "which is off"},
+		"unknown key":  {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {tsk: x}\n", `unknown setting "tsk"`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			writeConfig(t, base+tc.yml)

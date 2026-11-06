@@ -77,12 +77,12 @@ func run() error {
 	var ready atomic.Pointer[bot.Bot]
 	var hooks http.Handler
 	if len(cfg.Hooks) > 0 {
-		hooks = webhook.Handler(cfg.WebhookToken, func(name, text string) error {
+		hooks = webhook.Handler(cfg.WebhookToken, func(name, text, key string) error {
 			b := ready.Load()
 			switch {
 			case b == nil:
 				return errors.New("starting up, try again shortly")
-			case !b.Hook(ctx, name, text):
+			case !b.Hook(ctx, name, text, key):
 				return webhook.ErrUnknownHook
 			}
 			return nil
@@ -168,7 +168,7 @@ func botHooks(hooks []config.Hook) map[string]bot.Hook {
 	}
 	out := map[string]bot.Hook{}
 	for _, h := range hooks {
-		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group}
+		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown}
 	}
 	return out
 }

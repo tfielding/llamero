@@ -71,11 +71,12 @@ type fileConfig struct {
 
 // fileHook is one hook under webhooks.hooks.
 type fileHook struct {
-	Task   string     `yaml:"task"`
-	OnlyIf string     `yaml:"only_if"`
-	To     stringList `yaml:"to"`
-	Wake   string     `yaml:"wake"`
-	Group  string     `yaml:"group"`
+	Task     string     `yaml:"task"`
+	OnlyIf   string     `yaml:"only_if"`
+	To       stringList `yaml:"to"`
+	Wake     string     `yaml:"wake"`
+	Group    string     `yaml:"group"`
+	Cooldown string     `yaml:"cooldown"`
 }
 
 type fileServer struct {

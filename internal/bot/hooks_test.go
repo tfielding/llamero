@@ -29,7 +29,7 @@ func setupHooks(t *testing.T, hooks ...Hook) (testBot, *fakeMsg, *fakeLLM, *fake
 func TestHookChecked(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "camera_alert", Task: "Say what happened at the door."})
 	l.answer = "Someone left a parcel at the door."
-	if !b.Hook(b.ctx, "camera_alert", "Alert 123 on front_door: person") {
+	if !b.Hook(b.ctx, "camera_alert", "Alert 123 on front_door: person", "") {
 		t.Fatal("hook not found")
 	}
 	if got := reply(t, m); got != "🔔 **camera_alert**\n\nSomeone left a parcel at the door." {
@@ -60,15 +60,15 @@ func TestHookChecked(t *testing.T) {
 		chat.History[1].Content != "Someone left a parcel at the door." {
 		t.Errorf("history: %+v", chat.History)
 	}
-	if b.Hook(b.ctx, "nope", "x") {
+	if b.Hook(b.ctx, "nope", "x", "") {
 		t.Error("unknown hook accepted")
 	}
 }
 
 func TestHookGroupsEvents(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Summarize.", Group: 100 * time.Millisecond})
-	b.Hook(b.ctx, "cams", "person on driveway")
-	b.Hook(b.ctx, "cams", "person on porch")
+	b.Hook(b.ctx, "cams", "person on driveway", "")
+	b.Hook(b.ctx, "cams", "person on porch", "")
 	reply(t, m)
 	expectSilence(t, m)
 	l.mu.Lock()
@@ -80,7 +80,7 @@ func TestHookGroupsEvents(t *testing.T) {
 
 	// Past the cap, events are counted, not listed.
 	for i := 0; i < maxHookEvents+3; i++ {
-		b.Hook(b.ctx, "cams", "event")
+		b.Hook(b.ctx, "cams", "event", "")
 	}
 	reply(t, m)
 	l.mu.Lock()
@@ -94,7 +94,7 @@ func TestHookGroupsEvents(t *testing.T) {
 func TestHookOnlyIf(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "a person is at the door"})
 	l.answer = "NOTHING_TO_REPORT"
-	b.Hook(b.ctx, "door", "motion on front_door")
+	b.Hook(b.ctx, "door", "motion on front_door", "")
 	expectSilence(t, m)
 	l.mu.Lock()
 	calls, last := l.calls, l.last[len(l.last)-1].Content
@@ -106,7 +106,7 @@ func TestHookOnlyIf(t *testing.T) {
 	if chat, _ := b.store.Load(me); len(chat.History) != 0 {
 		t.Errorf("nothing to report was saved: %+v", chat.History)
 	}
-	b.Hook(b.ctx, "door", "motion on front_door")
+	b.Hook(b.ctx, "door", "motion on front_door", "")
 	if got := reply(t, m); !strings.Contains(got, "A person is at the door.") {
 		t.Errorf("got %q", got)
 	}
@@ -114,7 +114,7 @@ func TestHookOnlyIf(t *testing.T) {
 
 func TestHookWithoutTask(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "leak", To: []string{me}})
-	b.Hook(b.ctx, "leak", "Water under the sink")
+	b.Hook(b.ctx, "leak", "Water under the sink", "")
 	if got := reply(t, m); got != "🔔 leak\n\nWater under the sink" {
 		t.Errorf("got %q", got)
 	}
@@ -128,7 +128,7 @@ func TestHookWithoutTask(t *testing.T) {
 func TestHookOllamaDown(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door."})
 	l.pingErr = errors.New("connection refused")
-	b.Hook(b.ctx, "door", "person on front_door")
+	b.Hook(b.ctx, "door", "person on front_door", "")
 	if got := reply(t, m); got != "🔔 door (not checked: Ollama is unreachable)\n\nperson on front_door" {
 		t.Errorf("got %q", got)
 	}
@@ -159,7 +159,7 @@ func TestNoAnswerAfterTools(t *testing.T) {
 	l.mu.Lock()
 	l.blanks = 2
 	l.mu.Unlock()
-	b.Hook(b.ctx, "door", "person on front_door")
+	b.Hook(b.ctx, "door", "person on front_door", "")
 	if got := reply(t, m); got != "🔔 door (not checked: the model gave no answer)\n\nperson on front_door" {
 		t.Errorf("hook: %q", got)
 	}
@@ -170,7 +170,7 @@ func TestHookOnlyIfWithPictures(t *testing.T) {
 	b, m, l, ft := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "a person is at the door"})
 	ft.out = []toolbox.Image{{MIME: "image/jpeg", Data: []byte("jpg")}}
 	l.toolCall, l.answer = call("get_state", map[string]any{"name": "front_door"}), "NOTHING_TO_REPORT. Only a car passed on the street."
-	b.Hook(b.ctx, "door", "car on front_door")
+	b.Hook(b.ctx, "door", "car on front_door", "")
 	expectSilence(t, m)
 	if ft.called() != 1 {
 		t.Fatalf("snapshot tool called %d times", ft.called())
@@ -180,7 +180,7 @@ func TestHookOnlyIfWithPictures(t *testing.T) {
 	l.mu.Lock()
 	l.answer = "A person is at the door."
 	l.mu.Unlock()
-	b.Hook(b.ctx, "door", "person on front_door")
+	b.Hook(b.ctx, "door", "person on front_door", "")
 	if got := reply(t, m); !strings.Contains(got, "A person is at the door.") {
 		t.Fatalf("got %q", got)
 	}
@@ -195,7 +195,7 @@ func TestHookFeedback(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "a real person is there"})
 	b.opt.LearnedDir = t.TempDir()
 	l.answer = "A person is at the door."
-	b.Hook(b.ctx, "door", "person on front_door")
+	b.Hook(b.ctx, "door", "person on front_door", "")
 	reply(t, m)
 
 	// The user says it was wrong; the model saves it without asking for approval.
@@ -221,7 +221,7 @@ func TestHookFeedback(t *testing.T) {
 	}
 
 	// The next check of that hook gets it.
-	b.Hook(b.ctx, "door", "person on front_door")
+	b.Hook(b.ctx, "door", "person on front_door", "")
 	reply(t, m)
 	l.mu.Lock()
 	last := l.last[len(l.last)-1].Content
@@ -277,5 +277,43 @@ func TestLearnedKeepsNewest(t *testing.T) {
 	}
 	if got := b.learnedForCheck("door"); !strings.HasSuffix(got, fmt.Sprintf("- entry %d\n\n", maxLearned+4)) {
 		t.Errorf("for check: %q", got)
+	}
+}
+
+func TestHookCooldown(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check it.", Cooldown: 300 * time.Millisecond})
+	l.answer = "Someone is there."
+	calls := func() int { l.mu.Lock(); defer l.mu.Unlock(); return l.calls }
+
+	b.Hook(b.ctx, "cams", "person on front_door", "front_door")
+	reply(t, m)
+	// Same camera, during the cooldown: skipped without asking the model.
+	b.Hook(b.ctx, "cams", "person on front_door again", "front_door")
+	expectSilence(t, m)
+	if n := calls(); n != 1 {
+		t.Fatalf("model asked %d times during the cooldown", n)
+	}
+	// Another camera isn't cooling down.
+	b.Hook(b.ctx, "cams", "person on garden", "garden")
+	reply(t, m)
+	// After it, the first camera is checked again.
+	time.Sleep(350 * time.Millisecond)
+	b.Hook(b.ctx, "cams", "person on front_door later", "front_door")
+	reply(t, m)
+	if n := calls(); n != 3 {
+		t.Errorf("model asked %d times", n)
+	}
+
+	// A check that finds nothing doesn't start a cooldown.
+	b2, m2, l2, _ := setupHooks(t, Hook{Name: "door", Task: "Check.", OnlyIf: "a person", Cooldown: time.Minute})
+	l2.answer = "NOTHING_TO_REPORT"
+	b2.Hook(b2.ctx, "door", "shadow", "front_door")
+	expectSilence(t, m2)
+	l2.mu.Lock()
+	l2.answer = "A person."
+	l2.mu.Unlock()
+	b2.Hook(b2.ctx, "door", "person", "front_door")
+	if got := reply(t, m2); !strings.Contains(got, "A person.") {
+		t.Errorf("got %q", got)
 	}
 }

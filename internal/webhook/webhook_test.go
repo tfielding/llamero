@@ -10,10 +10,10 @@ import (
 
 func TestHandler(t *testing.T) {
 	var got []string
-	h := Handler("s3cret-token-0123456789", func(name, text string) error {
+	h := Handler("s3cret-token-0123456789", func(name, text, key string) error {
 		switch name {
 		case "door":
-			got = append(got, text)
+			got = append(got, text+"|"+key)
 			return nil
 		case "starting":
 			return errors.New("starting up")
@@ -25,6 +25,8 @@ func TestHandler(t *testing.T) {
 		code                          int
 		want                          string // in the response
 	}{
+		{"json key", "/hooks/door", "Bearer s3cret-token-0123456789", "application/json", `{"text": "person", "key": "front_door"}`, 202, "queued"},
+		{"plain key", "/hooks/door?key=garden", "Bearer s3cret-token-0123456789", "text/plain", "cat", 202, "queued"},
 		{"json", "/hooks/door", "Bearer s3cret-token-0123456789", "application/json", `{"text": "someone at the door"}`, 202, "queued"},
 		{"json message", "/hooks/door", "Bearer s3cret-token-0123456789", "application/json; charset=utf-8", `{"message": "a car"}`, 202, "queued"},
 		{"plain", "/hooks/door", "Bearer s3cret-token-0123456789", "text/plain", "dog in the garden", 202, "queued"},
@@ -47,7 +49,7 @@ func TestHandler(t *testing.T) {
 			t.Errorf("%s: %d %s", tc.name, rec.Code, rec.Body.String())
 		}
 	}
-	if strings.Join(got, "|") != "someone at the door|a car|dog in the garden" {
+	if strings.Join(got, ",") != "person|front_door,cat|garden,someone at the door|,a car|,dog in the garden|" {
 		t.Errorf("delivered: %q", got)
 	}
 
@@ -59,7 +61,7 @@ func TestHandler(t *testing.T) {
 	}
 
 	// With no token configured, nothing gets in.
-	open := Handler("", func(string, string) error { t.Fatal("delivered without a token"); return nil })
+	open := Handler("", func(string, string, string) error { t.Fatal("delivered without a token"); return nil })
 	req := httptest.NewRequest("POST", "/hooks/door", strings.NewReader("x"))
 	req.Header.Set("Authorization", "Bearer ")
 	rec = httptest.NewRecorder()

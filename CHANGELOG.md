@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   (`hook_feedback` tool, no approval needed). Later checks of that hook get your recent verdicts as
   examples. Kept in `data/learned/<hook>.md`; new `/learned` command lists them, `/learned clear
   <hook>` forgets them.
+- Hook `cooldown`: after a message, the hook skips events with the same `key` (e.g. a camera, sent as
+  `"key"` in the JSON or `?key=`) for that long, without asking the model. Only a sent message starts
+  it.
 
 ### Fixed
 - When the model uses tools and then writes nothing, it's asked once more for an answer before the
