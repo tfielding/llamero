@@ -5,6 +5,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -134,6 +135,9 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		return // shutting down
 	case err != nil && unreachable(err):
 		unchecked("lost the connection to Ollama (" + short(err) + ")")
+		return
+	case errors.As(err, new(noAnswer)):
+		unchecked("the model gave no answer")
 		return
 	case err != nil:
 		unchecked("the model returned an error (" + short(err) + ")")

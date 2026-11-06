@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- When the model uses tools and then writes nothing, it's asked once more for an answer before the
+  bot gives up. Hooks and scheduled checks no longer send the chat's "Sorry, the model returned no
+  answer… Try asking again": a hook sends its events marked "not checked", and a schedule reports
+  a failed run.
+
 ## [0.3.0] - 2026-11-06
 
 ### Added

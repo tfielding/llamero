@@ -135,6 +135,9 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []signalcli
 	stopTyping := b.typing(ctx, sender)
 	answer, images, stats, err := b.run(callCtx, sender, model, msgs, think, tools, info.Has("vision"))
 	stopTyping()
+	if na := (noAnswer{}); errors.As(err, &na) {
+		answer, err = emptyAnswer(na.failures, na.rounds), nil
+	}
 	b.mu.Lock()
 	delete(b.active, sender)
 	b.mu.Unlock()
@@ -280,6 +283,7 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 	var images []toolbox.Image
 	var stats ollama.Stats
 	failures := 0
+	nudged := false   // asked once for an answer after the model wrote none
 	lastFailure := "" // error from the previous tool call, shown if the next one needs approval
 	declines := 0
 	toolsOver := false // the user declined twice or didn't answer: no more tool calls
@@ -299,7 +303,15 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 		stats.Add(res.Stats)
 		if len(res.ToolCalls) == 0 || len(defs) == 0 {
 			if strings.TrimSpace(res.Content) == "" && len(images) == 0 {
-				return emptyAnswer(failures, round), nil, stats, nil
+				if round > 0 && !nudged {
+					// Some models stop after their tool calls without writing anything: ask once more.
+					slog.Warn("model wrote no answer after using tools, asking again", "rounds", round)
+					nudged, defs = true, nil
+					msgs = append(msgs, ollama.Message{Role: "system", Content: "You used tools but wrote no answer. " +
+						"Answer now, in words, with what the tools returned. If they found nothing, say so."})
+					continue
+				}
+				return "", nil, stats, noAnswer{failures: failures, rounds: round}
 			}
 			return res.Content, images, stats, nil
 		}
@@ -420,6 +432,12 @@ func unknownTool(name string, tools []toolbox.Tool) string {
 	return fmt.Sprintf("Tool failed: there is no tool named %q, so nothing was run. Use one of these exact names: %s.",
 		name, strings.Join(names, ", "))
 }
+
+// noAnswer is run's error when the model wrote nothing, even after being asked again. A chat
+// reply explains it (emptyAnswer); a check nobody is waiting on reports it as a failure.
+type noAnswer struct{ failures, rounds int }
+
+func (e noAnswer) Error() string { return "the model gave no answer" }
 
 // emptyAnswer explains a blank reply instead of sending nothing useful.
 func emptyAnswer(failures, rounds int) string {

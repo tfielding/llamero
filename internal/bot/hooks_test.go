@@ -132,3 +132,34 @@ func TestHookOllamaDown(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestNoAnswerAfterTools(t *testing.T) {
+	// Chat: one empty answer after a tool call gets a second ask, which answers.
+	b, m, l, ft := setupHooks(t, Hook{Name: "door", Task: "Check the door."})
+	l.toolCall, l.blanks = call("get_state", map[string]any{"name": "porch"}), 1
+	b.Handle(dm(me, "is anyone at the door?"))
+	if got := reply(t, m); !strings.Contains(got, "echo: You used tools but wrote no answer. Answer now, in words") {
+		t.Errorf("after one blank: %q", got)
+	}
+	if ft.called() != 1 {
+		t.Errorf("tool called %d times", ft.called())
+	}
+
+	// Chat: blank twice, so the user gets the explanation.
+	l.mu.Lock()
+	l.blanks = 2
+	l.mu.Unlock()
+	b.Handle(dm(me, "and now?"))
+	if got := reply(t, m); got != "Sorry, the model returned no answer after using its tools. Try asking again." {
+		t.Errorf("after two blanks: %q", got)
+	}
+
+	// A hook doesn't pass that on: the event arrives, marked not checked.
+	l.mu.Lock()
+	l.blanks = 2
+	l.mu.Unlock()
+	b.Hook(b.ctx, "door", "person on front_door")
+	if got := reply(t, m); got != "🔔 door (not checked: the model gave no answer)\n\nperson on front_door" {
+		t.Errorf("hook: %q", got)
+	}
+}

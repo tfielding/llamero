@@ -374,3 +374,14 @@ func waitIdle(t *testing.T, b testBot) {
 	}
 	t.Fatal("still busy")
 }
+
+func TestScheduledRunNoAnswer(t *testing.T) {
+	b, m, l, _, ss := setupSchedules(t)
+	b.opt.Tools = &fakeTools{tools: []toolbox.Tool{{Name: "get_state", Schema: lightSchema, ReadOnly: true}}}
+	l.toolCall, l.blanks = call("get_state", map[string]any{"name": "driveway"}), 2
+	addSchedule(t, ss, "daily 07:30", "Check the driveway", "")
+	b.dueSchedules(b.ctx, time.Now().UTC())
+	if got := reply(t, m); !strings.Contains(got, "Schedule 1 didn't run: the model gave no answer.") {
+		t.Errorf("got %q", got)
+	}
+}

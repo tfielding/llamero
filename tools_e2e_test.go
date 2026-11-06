@@ -295,12 +295,15 @@ func TestRepeatedToolFailuresStopEarly(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(reqs) != 4 { // 3 failing tool rounds, then one forced answer
+	if len(reqs) != 5 { // 3 failing tool rounds, one forced answer, then one more ask after it came back blank
 		t.Fatalf("model calls: %d", len(reqs))
 	}
 	last := reqs[3]
 	if len(last.Tools) != 0 || !strings.Contains(last.Messages[len(last.Messages)-1].Content, "do not guess") {
 		t.Fatalf("final request: tools=%d last=%+v", len(last.Tools), last.Messages[len(last.Messages)-1])
+	}
+	if again := reqs[4]; len(again.Tools) != 0 || !strings.Contains(again.Messages[len(again.Messages)-1].Content, "wrote no answer") {
+		t.Fatalf("second ask: tools=%d last=%+v", len(again.Tools), again.Messages[len(again.Messages)-1])
 	}
 	if msg, _ := sent["message"].(string); !strings.Contains(msg, "3 tool call(s) failed") {
 		t.Fatalf("reply: %q", msg)

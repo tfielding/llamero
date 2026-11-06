@@ -84,6 +84,7 @@ type fakeLLM struct {
 	retry    bool             // and calls it again after any tool result (an error or a decline)
 	answer   string           // if set, the final answer instead of an echo
 	offered  []string         // tool names offered in the last call
+	blanks   int              // if set, this many answers (not tool calls) come back empty
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -120,6 +121,12 @@ func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message,
 	if answer != "" {
 		content = answer
 	}
+	f.mu.Lock()
+	if f.blanks > 0 {
+		f.blanks--
+		content = ""
+	}
+	f.mu.Unlock()
 	return ollama.Result{
 		Content: content,
 		Stats:   ollama.Stats{EvalCount: 100, EvalDuration: 2 * time.Second, PromptEvalCount: 50, PromptEvalDuration: 500 * time.Millisecond, TotalDuration: 3 * time.Second},

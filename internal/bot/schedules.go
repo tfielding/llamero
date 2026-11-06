@@ -5,6 +5,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -314,6 +315,9 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		return // shutting down
 	case err != nil && unreachable(err):
 		b.scheduleFailed(ctx, sender, *it, "lost the connection to Ollama ("+short(err)+")")
+		return
+	case errors.As(err, new(noAnswer)):
+		b.scheduleFailed(ctx, sender, *it, "the model gave no answer")
 		return
 	case err != nil:
 		b.scheduleFailed(ctx, sender, *it, "the model returned an error ("+short(err)+")")
