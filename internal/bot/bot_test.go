@@ -29,6 +29,7 @@ type fakeMsg struct {
 	ch        chan string
 	reactions []string
 	files     map[string][]byte // received attachments by id
+	attached  []string          // "type name" of every attachment sent
 }
 
 func (f *fakeMsg) Attachment(_ context.Context, id string) ([]byte, error) {
@@ -42,6 +43,9 @@ func (f *fakeMsg) Attachment(_ context.Context, id string) ([]byte, error) {
 
 func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []signalcli.Attachment) error {
 	f.mu.Lock()
+	for _, a := range att {
+		f.attached = append(f.attached, a.MIME+" "+a.Name)
+	}
 	f.sent = append(f.sent, to+": "+text)
 	f.styled = append(f.styled, styled)
 	f.mu.Unlock()

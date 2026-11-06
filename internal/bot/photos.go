@@ -98,3 +98,12 @@ func toJPEG(data []byte) ([]byte, error) {
 	}
 	return out.Bytes(), nil
 }
+
+// stillImage reports whether a vision model can be given a picture of this type.
+func stillImage(mime string) bool {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "image/jpeg", "image/jpg", "image/png":
+		return true
+	}
+	return false
+}

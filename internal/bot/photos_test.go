@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/signalcli"
+	"github.com/tfielding/signal-ollama/internal/toolbox"
 )
 
 // picture encodes a w×h picture of one colour as PNG or JPEG.
@@ -181,5 +183,49 @@ func TestToJPEG(t *testing.T) {
 	}
 	if _, err := toJPEG([]byte("%PDF-1.7")); err == nil {
 		t.Error("a PDF was read as a picture")
+	}
+}
+
+func TestToolClipNotGivenToTheModel(t *testing.T) {
+	b, m, l, _ := setup(t)
+	l.caps = []string{"tools", "vision"}
+	tc := &ollama.ToolCall{}
+	tc.Function.Name = "get_alert_clip"
+	l.toolCall = tc
+	b.opt.Tools = &fakeTools{
+		tools: []toolbox.Tool{{Name: "get_alert_clip", Schema: lightSchema, ReadOnly: true}},
+		out:   []toolbox.Image{{MIME: "image/jpeg", Data: []byte("jpg")}, {MIME: "image/gif", Data: []byte("GIF89a")}},
+	}
+	b.Handle(dm(me, "show me what happened"))
+	reply(t, m)
+
+	l.mu.Lock()
+	var toolMsg ollama.Message
+	for _, msg := range l.last {
+		if msg.Role == "tool" {
+			toolMsg = msg
+		}
+	}
+	l.mu.Unlock()
+	// The model sees the still picture, not the clip, and knows about both.
+	if len(toolMsg.Images) != 1 || string(toolMsg.Images[0]) != "jpg" ||
+		!strings.Contains(toolMsg.Content, "[1 image(s) attached.") ||
+		!strings.Contains(toolMsg.Content, "[1 image(s) or clip(s) returned. They will be sent to the user with your reply; you cannot see them.]") {
+		t.Fatalf("tool message: %q with %d images", toolMsg.Content, len(toolMsg.Images))
+	}
+	// The user gets both, the clip as a .gif.
+	m.mu.Lock()
+	attached := strings.Join(m.attached, ", ")
+	m.mu.Unlock()
+	if attached != "image/jpeg image-1.jpg, image/gif image-2.gif" {
+		t.Errorf("attachments sent: %s", attached)
+	}
+}
+
+func TestStillImage(t *testing.T) {
+	for mime, want := range map[string]bool{"image/jpeg": true, "IMAGE/PNG": true, "image/gif": false, "image/webp": false, "": false} {
+		if got := stillImage(mime); got != want {
+			t.Errorf("stillImage(%q) = %v", mime, got)
+		}
 	}
 }

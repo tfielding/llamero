@@ -19,6 +19,7 @@ type fakeTools struct {
 	calls []map[string]any
 	fail  string            // if set, every call returns this error
 	notes map[string]string // last per-server notes passed to Guidance
+	out   []toolbox.Image   // pictures every successful call returns
 }
 
 func (f *fakeTools) Tools(context.Context) []toolbox.Tool { return f.tools }
@@ -29,7 +30,7 @@ func (f *fakeTools) Call(_ context.Context, name string, args map[string]any) (t
 	if f.fail != "" {
 		return toolbox.Output{Text: f.fail, IsError: true}, nil
 	}
-	return toolbox.Output{Text: "turned off"}, nil
+	return toolbox.Output{Text: "turned off", Images: f.out}, nil
 }
 func (f *fakeTools) Errors() map[string]error { return nil }
 func (f *fakeTools) Guidance(_ []toolbox.Tool, notes map[string]string) string {

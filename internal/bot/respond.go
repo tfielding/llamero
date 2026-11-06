@@ -388,18 +388,23 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 			} else if out.IsError {
 				msg.Content = "Tool returned an error: " + out.Text
 			}
+			unseen := 0
 			for _, img := range out.Images {
 				images = append(images, img)
-				if vision {
+				// Vision models take still JPEG or PNG pictures; a clip (GIF) is only for the user.
+				if vision && stillImage(img.MIME) {
 					msg.Images = append(msg.Images, img.Data)
+				} else {
+					unseen++
 				}
 			}
-			if len(out.Images) > 0 {
-				note := "[%d image(s) returned. They will be sent to the user with your reply; you cannot see them.]"
-				if vision {
-					note = "[%d image(s) attached. They will also be sent to the user with your reply.]"
-				}
-				msg.Content = strings.TrimSpace(msg.Content + "\n" + fmt.Sprintf(note, len(out.Images)))
+			if seen := len(out.Images) - unseen; seen > 0 {
+				msg.Content = strings.TrimSpace(msg.Content + "\n" +
+					fmt.Sprintf("[%d image(s) attached. They will also be sent to the user with your reply.]", seen))
+			}
+			if unseen > 0 {
+				msg.Content = strings.TrimSpace(msg.Content + "\n" +
+					fmt.Sprintf("[%d image(s) or clip(s) returned. They will be sent to the user with your reply; you cannot see them.]", unseen))
 			}
 			msgs = append(msgs, msg)
 		}

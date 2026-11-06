@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Animated clips from tools (e.g. frigate-mcp's `get_alert_clip` GIFs) are sent to you but no longer
+  given to a vision model, which only takes still JPEG or PNG pictures; the model is told a clip was
+  sent.
+
 ### Added
 - Photos: send the bot a photo, with or without a question, and it looks at it. If the chat's model
   can't see images, `OLLAMA_VISION_MODEL` (or `ollama.vision_model`) answers that message and the

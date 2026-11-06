@@ -237,7 +237,9 @@ tool-specific code: list a server and its tools are offered to the model.
 - Only tools marked **read-only** are offered, unless the server's `allow_write` is `ask` or
   `true`. Anything that can change things (locks, alarms, settings) stays hidden by default.
 - Tools are only offered to models that support tool calling (Ollama reports this per model).
-- Pictures a tool returns are sent to you with the reply. A vision model sees them too.
+- Pictures a tool returns are sent to you with the reply. A vision model sees still ones (JPEG,
+  PNG) too; clips such as frigate-mcp's animated GIFs are only for you, and the model is told one
+  was sent.
 - Each server's notes reach the model with its tools: what the server sends itself (MCP
   "instructions"), plus its [knowledge](#knowledge) file.
 - Up to 6 rounds of tool calls per message. A read-only call that fails because of optional
