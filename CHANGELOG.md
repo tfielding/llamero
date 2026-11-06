@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-06
+
 ### Added
 - Hooks: other systems send events to `POST /hooks/<name>` (Home Assistant, a script, anything that
   can make an HTTP request), with a token (`WEBHOOK_TOKEN`). Each hook in `webhooks.hooks` has a
@@ -14,10 +16,6 @@ All notable changes to this project are documented here. The format follows
   default 30s). A hook without a task passes events on unchanged. If Ollama can't be reached, the
   events are sent unchecked rather than lost; `wake` wakes the Ollama machine first. Served on the
   health port (8092).
-
-## [0.3.0] - 2026-11-06
-
-### Added
 - Photos: send the bot a photo, with or without a question, and it looks at it. If the chat's model
   can't see images, `OLLAMA_VISION_MODEL` (or `ollama.vision_model`) answers that message and the
   chat keeps its model; if neither can, the bot says so. Photos are shrunk to 1600 px and sent as
