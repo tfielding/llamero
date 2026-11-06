@@ -27,6 +27,8 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
 - A [knowledge folder](#knowledge) of notes the model always has: people, routines, how to use each tool
 - [Scheduled checks](#schedules) set up by just asking: "every weekday at 7:30 tell me what happened
   overnight on the cameras", "remind me at 5pm to check the porch"
+- [Hooks](#hooks): other systems (Home Assistant, a script) send events to `POST /hooks/<name>`,
+  the model looks into them with your tools, and you hear about the ones that matter
 - Wakes a sleeping Ollama machine with [Wake-on-LAN](#wake-on-lan), or says right away that it's offline
 - Messages from one person are answered in order; different people don't block each other
 
@@ -194,6 +196,8 @@ Settings come from an optional config file, environment variables, or both.
 | `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
 | `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
+| `WEBHOOK_TOKEN` | `webhooks.token` | none | Token [hook](#hooks) callers send as `Authorization: Bearer <token>`; at least 16 characters, required with hooks |
+| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group` |
 | `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
 | `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
@@ -300,7 +304,74 @@ with ⏰. It joins the conversation, so you can follow up ("show me that one").
   `data/schedules`.
 - Checks wait their turn behind your own messages, and `/stop` cancels one that's running.
 - For instant alerts ("someone's at the door"), schedules are the wrong tool: they look every so
-  often. Use Frigate's or Home Assistant's own notifications for those.
+  often. Use a [hook](#hooks), which runs the moment something happens.
+
+## Hooks
+
+Hooks let other systems tell the bot something happened. They send an event to
+`POST /hooks/<name>`, the model looks into it with your tools, and you get a message starting
+with 🔔, or nothing if it doesn't matter. The bot doesn't know or care what sent the event: Home
+Assistant, Node-RED, a cron job or a script.
+
+```yaml
+# config.yml
+webhooks:
+  token: ${WEBHOOK_TOKEN}             # callers send "Authorization: Bearer <token>"
+  hooks:
+    front_door:
+      task: Find out who or what it was, with the cameras, and say so in one sentence.
+      only_if: a person came to the door, or anyone is there between 23:00 and 06:00
+    leak:                             # no task: the event is sent to you as it is
+      group: 0
+```
+
+An event is a short text, as JSON `{"text": "..."}` or a plain-text body:
+
+```bash
+curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"text": "Front door opened"}' http://signal-ollama:8092/hooks/front_door
+```
+
+- **`task`:** what the model does with the event, using read-only tools, like a
+  [scheduled check](#schedules). Put the details the tools need in the event text (an id, a
+  camera, a sensor). Without a task, the event is sent to you unchanged and the model isn't used.
+- **`only_if`:** report only when this is true; otherwise the bot stays silent. Without it, every
+  event gets a message.
+- **`to`:** who gets the messages, from `signal.allowed_senders`; default everyone in it. The model
+  runs once, in the first one's chat and with their model; the result goes to all of them and
+  joins each one's conversation, so "show me that" works afterwards.
+- **`group`:** events within this long of the first are checked together in one run (default
+  `30s`, at most `10m`, `0` for each on its own), so one person walking past three cameras is one
+  message. Up to 10 events are listed per run; more are counted.
+- **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
+  it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
+  than nothing.
+- Hooks are served on the health port, `HEALTH_ADDR` (default 8092). Publish it, or put the caller
+  on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
+  **503** still starting up.
+- Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
+
+**From Home Assistant:** a `rest_command` that any automation can call:
+
+```yaml
+# configuration.yaml
+rest_command:
+  signal_ollama_hook:
+    url: "http://<signal-ollama-host>:8092/hooks/{{ hook }}"
+    method: POST
+    headers:
+      Authorization: !secret signal_ollama_hook_auth   # "Bearer <token>" in secrets.yaml
+    content_type: application/json
+    payload: '{"text": {{ text | tojson }}}'
+```
+
+```yaml
+# an automation's action
+- action: rest_command.signal_ollama_hook
+  data:
+    hook: front_door
+    text: "{{ trigger.to_state.name }} opened"
+```
 
 ## Photos
 
@@ -379,8 +450,11 @@ Assistant:
 
 - **Allowlist only.** Only `ALLOWED_SENDERS` get answers; group chats are ignored.
 - **Read-only tools by default.** Tools that can change things are hidden unless a server allows
-  them, and with `ask` each call needs your approval. Scheduled checks only ever get read-only
-  tools, and creating or deleting a schedule needs your approval.
+  them, and with `ask` each call needs your approval. Scheduled checks and hooks only ever get
+  read-only tools, and creating or deleting a schedule needs your approval.
+- **Hooks need a token.** `POST /hooks/<name>` only accepts requests with `WEBHOOK_TOKEN`, and only
+  for hooks in the config file. Event text is shown to the model as an event, never as a message
+  from you, and can't unlock actions.
 - **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
   removes credentials from URLs.
 - **Local only.** Chats, photos and knowledge notes only go to your Ollama server. Chat history is

@@ -55,7 +55,26 @@ type Config struct {
 
 	KnowledgeDir      string // folder of Markdown notes for the model (see package knowledge)
 	KnowledgeMaxChars int    // cap on what those notes add to the prompt
+
+	WebhookToken string // what POST /hooks/<name> callers must send as "Authorization: Bearer <token>"
+	Hooks        []Hook // webhooks.hooks in the file, by name
 }
+
+// Hook is one hook: what to do with events sent to POST /hooks/<Name>.
+type Hook struct {
+	Name   string
+	Task   string        // what the model does with the events; empty = send them on unchanged
+	OnlyIf string        // report only when this is true
+	To     []string      // who gets the result; empty = everyone allowed
+	Wake   bool          // wake the Ollama machine if it's asleep
+	Group  time.Duration // events this soon after the first are handled together
+}
+
+const (
+	defaultHookGroup = 30 * time.Second
+	maxHookGroup     = 10 * time.Minute
+	minWebhookToken  = 16
+)
 
 // Load reads the settings: each from its environment variable if set, otherwise from the
 // config file (CONFIG_FILE, default /config/config.yml, optional), otherwise its default.
@@ -156,7 +175,82 @@ func Load() (Config, error) {
 	if c.MCPMaxChars, err = strconv.Atoi(s.get("MCP_MAX_RESULT_CHARS", strconv.Itoa(toolbox.DefaultMaxResultChars))); err != nil || c.MCPMaxChars < 1000 {
 		return c, fmt.Errorf("%s must be an integer >= 1000", s.name("MCP_MAX_RESULT_CHARS"))
 	}
+	if c.Hooks, err = s.hooks(c); err != nil {
+		return c, err
+	}
+	c.WebhookToken = s.get("WEBHOOK_TOKEN", "")
+	if len(c.Hooks) > 0 {
+		switch {
+		case c.HealthAddr == "":
+			return c, fmt.Errorf("webhooks.hooks in %s: hooks are served on HEALTH_ADDR (health.addr), which is off", s.f.path)
+		case c.WebhookToken == "":
+			return c, fmt.Errorf("%s is required when hooks are set: callers send it as \"Authorization: Bearer <token>\"", s.missing("WEBHOOK_TOKEN"))
+		case len(c.WebhookToken) < minWebhookToken:
+			return c, fmt.Errorf("%s must be at least %d characters (e.g. from: openssl rand -hex 24)", s.name("WEBHOOK_TOKEN"), minWebhookToken)
+		}
+	}
 	return c, nil
+}
+
+// hooks returns webhooks.hooks from the file, checked: valid names, a task for only_if, and
+// recipients who are allowed senders.
+func (s settings) hooks(c Config) ([]Hook, error) {
+	names := make([]string, 0, len(s.f.hooks))
+	for name := range s.f.hooks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []Hook
+	for _, name := range names {
+		fh := s.f.hooks[name]
+		where := fmt.Sprintf("webhooks.hooks.%s in %s", name, s.f.path)
+		if !validHookName(name) {
+			return nil, fmt.Errorf("webhooks.hooks in %s: %q is not a valid hook name (letters, digits, - and _)", s.f.path, name)
+		}
+		h := Hook{Name: name, Task: strings.TrimSpace(fh.Task), OnlyIf: strings.TrimSpace(fh.OnlyIf), Group: defaultHookGroup}
+		if h.OnlyIf != "" && h.Task == "" {
+			return nil, fmt.Errorf("%s: only_if needs a task (without a task, events are sent on unchecked)", where)
+		}
+		for _, r := range fh.To {
+			if !c.Allowed[r] {
+				return nil, fmt.Errorf("%s: to: %s is not in signal.allowed_senders", where, mask(r))
+			}
+			h.To = append(h.To, r)
+		}
+		if v := strings.TrimSpace(fh.Wake); v != "" {
+			var err error
+			if h.Wake, err = strconv.ParseBool(v); err != nil {
+				return nil, fmt.Errorf("%s: wake must be true or false", where)
+			}
+			if h.Wake && c.WakeMAC == nil {
+				return nil, fmt.Errorf("%s: wake needs Wake-on-LAN (ollama.wake_on_lan.mac)", where)
+			}
+		}
+		if v := strings.TrimSpace(fh.Group); v != "" {
+			d, err := time.ParseDuration(v)
+			if v == "0" {
+				d, err = 0, nil
+			}
+			if err != nil || d < 0 || d > maxHookGroup {
+				return nil, fmt.Errorf("%s: group must be a duration from 0 to %s, like 30s", where, maxHookGroup)
+			}
+			h.Group = d
+		}
+		out = append(out, h)
+	}
+	return out, nil
+}
+
+func validHookName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // settings looks a setting up in the environment, then in the config file.
@@ -414,6 +508,30 @@ func (c Config) Describe() string {
 		line("MCP_TOOLS", tools)
 		line("MCP_ALLOW_WRITE", c.MCPWrite)
 		line("MCP_MAX_RESULT_CHARS", c.MCPMaxChars)
+	}
+	if len(c.Hooks) > 0 {
+		line("WEBHOOK_TOKEN", "set")
+	}
+	for _, h := range c.Hooks {
+		parts := []string{"sends events on unchecked"}
+		if h.Task != "" {
+			parts = []string{"task: " + h.Task}
+		}
+		if h.OnlyIf != "" {
+			parts = append(parts, "only if: "+h.OnlyIf)
+		}
+		if len(h.To) > 0 {
+			to := make([]string, len(h.To))
+			for i, r := range h.To {
+				to[i] = mask(r)
+			}
+			parts = append(parts, "to "+strings.Join(to, " "))
+		}
+		if h.Wake {
+			parts = append(parts, "wakes Ollama")
+		}
+		parts = append(parts, "group "+h.Group.String())
+		line("HOOK", "/hooks/"+h.Name+" ("+strings.Join(parts, "; ")+")")
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
 }

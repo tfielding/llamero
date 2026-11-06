@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Hooks: other systems send events to `POST /hooks/<name>` (Home Assistant, a script, anything that
+  can make an HTTP request), with a token (`WEBHOOK_TOKEN`). Each hook in `webhooks.hooks` has a
+  `task` the model does with read-only tools, like a scheduled check, and an optional `only_if`, so
+  you only hear about events that matter. Events close together are checked in one run (`group`,
+  default 30s). A hook without a task passes events on unchanged. If Ollama can't be reached, the
+  events are sent unchecked rather than lost; `wake` wakes the Ollama machine first. Served on the
+  health port (8092).
+
 ## [0.3.0] - 2026-11-06
 
 ### Added

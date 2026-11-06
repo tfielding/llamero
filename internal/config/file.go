@@ -57,12 +57,25 @@ type fileConfig struct {
 		Dir      string `yaml:"dir"`
 		MaxChars string `yaml:"max_chars"`
 	} `yaml:"knowledge"`
+	Webhooks struct {
+		Token string              `yaml:"token"`
+		Hooks map[string]fileHook `yaml:"hooks"`
+	} `yaml:"webhooks"`
 	MCP struct {
 		AllowWrite     string                `yaml:"allow_write"`
 		Tools          stringList            `yaml:"tools"`
 		MaxResultChars string                `yaml:"max_result_chars"`
 		Servers        map[string]fileServer `yaml:"servers"`
 	} `yaml:"mcp"`
+}
+
+// fileHook is one hook under webhooks.hooks.
+type fileHook struct {
+	Task   string     `yaml:"task"`
+	OnlyIf string     `yaml:"only_if"`
+	To     stringList `yaml:"to"`
+	Wake   string     `yaml:"wake"`
+	Group  string     `yaml:"group"`
 }
 
 type fileServer struct {
@@ -98,6 +111,7 @@ var fileKeys = map[string]string{
 	"MCP_ALLOW_WRITE":      "mcp.allow_write",
 	"MCP_TOOLS":            "mcp.tools",
 	"MCP_MAX_RESULT_CHARS": "mcp.max_result_chars",
+	"WEBHOOK_TOKEN":        "webhooks.token",
 }
 
 // file is a loaded config.yml: settings by environment variable name, and the MCP servers.
@@ -105,6 +119,7 @@ type file struct {
 	path    string // empty = no file
 	values  map[string]string
 	servers map[string]fileServer
+	hooks   map[string]fileHook
 }
 
 // stringList accepts a YAML list or a comma-separated string.
@@ -151,7 +166,7 @@ func loadFile(path string) (file, error) {
 	if err != nil {
 		return file{}, fmt.Errorf("%s: %w", path, err)
 	}
-	f := file{path: path, servers: fc.MCP.Servers, values: map[string]string{
+	f := file{path: path, servers: fc.MCP.Servers, hooks: fc.Webhooks.Hooks, values: map[string]string{
 		"SIGNAL_URL":           fc.Signal.URL,
 		"SIGNAL_NUMBER":        fc.Signal.Number,
 		"ALLOWED_SENDERS":      strings.Join(fc.Signal.AllowedSenders, ","),
@@ -175,6 +190,7 @@ func loadFile(path string) (file, error) {
 		"MCP_ALLOW_WRITE":      fc.MCP.AllowWrite,
 		"MCP_TOOLS":            strings.Join(fc.MCP.Tools, ","),
 		"MCP_MAX_RESULT_CHARS": fc.MCP.MaxResultChars,
+		"WEBHOOK_TOKEN":        fc.Webhooks.Token,
 	}}
 	for k, v := range f.values {
 		if v = strings.TrimSpace(v); v == "" {

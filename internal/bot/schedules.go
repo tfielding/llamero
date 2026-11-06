@@ -289,15 +289,6 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		}
 	}
 	start := time.Now()
-	chat, err := b.store.Load(sender)
-	if err != nil {
-		slog.Error("load history", "err", err)
-		return
-	}
-	model := chat.Model
-	if model == "" {
-		model = b.opt.DefaultModel
-	}
 	if err := b.llm.Ping(ctx); err != nil {
 		switch {
 		case it.Wake && b.opt.Wake != nil && b.wakeQuietly(ctx):
@@ -311,30 +302,12 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 			return
 		}
 	}
-	info, _ := b.llm.Info(ctx, model)
-	var tools []toolbox.Tool
-	if b.opt.Tools != nil && info.Has("tools") {
-		for _, t := range b.opt.Tools.Tools(ctx) {
-			if t.ReadOnly { // no one is there to approve an action
-				tools = append(tools, t)
-			}
-		}
-	}
-	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: scheduledTask(*it, b.specText(it.When))})
-
-	b.mu.Lock()
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	b.active[sender] = activity{model: model, started: start, cancel: cancel, task: fmt.Sprintf("running schedule %d", id)}
-	b.mu.Unlock()
-	slog.Info("scheduled check", "id", id, "model", model, "tools", len(tools))
-	answer, images, _, err := b.run(callCtx, sender, model, msgs, b.thinkValue(ctx, model, chat.Think), tools, info.Has("vision"))
-	b.mu.Lock()
-	delete(b.active, sender)
-	b.mu.Unlock()
+	slog.Info("scheduled check", "id", id)
+	answer, images, stopped, err := b.checkRun(ctx, sender, fmt.Sprintf("running schedule %d", id),
+		scheduledTask(*it, b.specText(it.When)))
 	done()
 	switch {
-	case err != nil && callCtx.Err() != nil && ctx.Err() == nil:
+	case stopped:
 		slog.Info("scheduled check stopped", "id", id) // by /stop, which already replied
 		return
 	case err != nil && ctx.Err() != nil:
@@ -358,19 +331,61 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		return
 	}
 	slog.Info("scheduled check sent", "id", id, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
+	b.remember(sender, fmt.Sprintf("(Scheduled check %d: %s)", id, it.Task), answer, len(images))
+}
 
-	// Keep it in the conversation, so "show me that one" works afterwards.
-	if chat, err = b.store.Load(sender); err == nil {
-		saved := answer
-		if len(images) > 0 {
-			saved += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", len(images))
+// checkRun runs the model for a check nobody is waiting on (a schedule or a hook) in sender's
+// chat, with read-only tools: no one is there to approve an action. stopped reports that /stop
+// ended it (which already replied).
+func (b *Bot) checkRun(ctx context.Context, sender, task, content string) (answer string, images []toolbox.Image, stopped bool, err error) {
+	chat, err := b.store.Load(sender)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("load history: %w", err)
+	}
+	model := chat.Model
+	if model == "" {
+		model = b.opt.DefaultModel
+	}
+	info, _ := b.llm.Info(ctx, model)
+	var tools []toolbox.Tool
+	if b.opt.Tools != nil && info.Has("tools") {
+		for _, t := range b.opt.Tools.Tools(ctx) {
+			if t.ReadOnly {
+				tools = append(tools, t)
+			}
 		}
-		chat.History = trim(append(chat.History,
-			ollama.Message{Role: "user", Content: fmt.Sprintf("(Scheduled check %d: %s)", id, it.Task)},
-			ollama.Message{Role: "assistant", Content: saved}), b.historyCap())
-		if err := b.store.Save(sender, chat); err != nil {
-			slog.Error("save history", "err", err)
-		}
+	}
+	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: content})
+
+	b.mu.Lock()
+	callCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	b.active[sender] = activity{model: model, started: time.Now(), cancel: cancel, task: task}
+	b.mu.Unlock()
+	slog.Info("check", "task", task, "model", model, "tools", len(tools))
+	answer, images, _, err = b.run(callCtx, sender, model, msgs, b.thinkValue(ctx, model, chat.Think), tools, info.Has("vision"))
+	b.mu.Lock()
+	delete(b.active, sender)
+	b.mu.Unlock()
+	return answer, images, err != nil && callCtx.Err() != nil && ctx.Err() == nil, err
+}
+
+// remember adds a check's result to sender's conversation, so "show me that one" works
+// afterwards.
+func (b *Bot) remember(sender, what, answer string, images int) {
+	chat, err := b.store.Load(sender)
+	if err != nil {
+		slog.Error("load history", "err", err)
+		return
+	}
+	if images > 0 {
+		answer += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", images)
+	}
+	chat.History = trim(append(chat.History,
+		ollama.Message{Role: "user", Content: what},
+		ollama.Message{Role: "assistant", Content: answer}), b.historyCap())
+	if err := b.store.Save(sender, chat); err != nil {
+		slog.Error("save history", "err", err)
 	}
 }
 

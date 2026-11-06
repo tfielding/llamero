@@ -46,6 +46,7 @@ type Options struct {
 	Tools           Tools           // nil = no tools
 	Knowledge       *knowledge.Base // notes from the knowledge folder; nil = none
 	Schedules       *schedule.Store // scheduled checks; nil = off
+	Hooks           map[string]Hook // hooks by name; nil = none
 	Location        *time.Location  // time zone for schedules; nil = time.Local
 	ScheduleTick    time.Duration   // how often to look for due schedules (default 15s)
 	OwnNumber       string
@@ -74,6 +75,7 @@ type Bot struct {
 	mu        sync.Mutex
 	queues    map[string]chan message // one worker per sender keeps replies in order
 	scheduled map[string]bool         // scheduled runs waiting or running, by "chat#id"
+	hookRuns  map[string]*hookRun     // hook events waiting for their run, by hook
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
@@ -85,6 +87,7 @@ type message struct {
 	attachments []signalcli.ReceivedAttachment // photos and files sent with it
 	ts          int64                          // Signal timestamp, which identifies the message for reactions
 	schedule    int                            // if set, run this schedule instead of answering text
+	hook        *hookRun                       // if set, handle these hook events instead
 }
 
 type activity struct {
@@ -110,7 +113,7 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
-		scheduled: map[string]bool{}}
+		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.
@@ -236,6 +239,10 @@ func (b *Bot) worker(ctx context.Context, sender string, q chan message) {
 func (b *Bot) process(ctx context.Context, sender string, msg message, queued int) {
 	if msg.schedule != 0 {
 		b.runSchedule(ctx, sender, msg.schedule)
+		return
+	}
+	if msg.hook != nil {
+		b.runHook(ctx, sender, msg.hook)
 		return
 	}
 	start := time.Now()

@@ -452,3 +452,79 @@ func TestVisionModel(t *testing.T) {
 		t.Fatalf("env wins: %q %v", c.VisionModel, err)
 	}
 }
+
+func TestWebhookConfig(t *testing.T) {
+	base := "signal: {number: \"+15550000009\", allowed_senders: [\"+15550000001\", \"+15550000002\"]}\n" +
+		"ollama: {wake_on_lan: {mac: \"aa:bb:cc:dd:ee:ff\"}}\n"
+	writeConfig(t, base+`webhooks:
+  token: ${HOOK_SECRET}
+  hooks:
+    camera_alert:
+      task: Look at the alert and say what happened.
+      only_if: a person is at the door at night
+      to: ["+15550000001"]
+      wake: true
+      group: 1m
+    leak:
+      group: 0
+`)
+	t.Setenv("HOOK_SECRET", "0123456789abcdef0123")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.WebhookToken != "0123456789abcdef0123" || len(c.Hooks) != 2 {
+		t.Fatalf("%q %+v", c.WebhookToken, c.Hooks)
+	}
+	cam, leak := c.Hooks[0], c.Hooks[1]
+	if cam.Name != "camera_alert" || cam.Task != "Look at the alert and say what happened." || cam.OnlyIf != "a person is at the door at night" ||
+		len(cam.To) != 1 || cam.To[0] != "+15550000001" || !cam.Wake || cam.Group != time.Minute {
+		t.Errorf("camera_alert: %+v", cam)
+	}
+	if leak.Name != "leak" || leak.Task != "" || leak.Group != 0 || leak.Wake || len(leak.To) != 0 {
+		t.Errorf("leak: %+v", leak)
+	}
+	d := c.Describe()
+	for _, want := range []string{"WEBHOOK_TOKEN: set\n",
+		"HOOK: /hooks/camera_alert (task: Look at the alert and say what happened.; only if: a person is at the door at night; to …0001; wakes Ollama; group 1m0s)",
+		"HOOK: /hooks/leak (sends events on unchecked; group 0s)"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("settings lack %q:\n%s", want, d)
+		}
+	}
+	if strings.Contains(d, "0123456789abcdef") {
+		t.Error("token shown in settings")
+	}
+
+	// The default group, and WEBHOOK_TOKEN from the environment.
+	writeConfig(t, base+"webhooks:\n  hooks:\n    door: {task: say who it is}\n")
+	t.Setenv("WEBHOOK_TOKEN", "fedcba9876543210fedc")
+	if c, err = Load(); err != nil || c.WebhookToken != "fedcba9876543210fedc" || c.Hooks[0].Group != 30*time.Second {
+		t.Fatalf("%v %+v", err, c.Hooks)
+	}
+	t.Setenv("WEBHOOK_TOKEN", "")
+
+	for name, tc := range map[string]struct{ yml, want string }{
+		"no token":    {"webhooks:\n  hooks:\n    door: {}\n", "webhooks.token in "},
+		"short token": {"webhooks:\n  token: short\n  hooks:\n    door: {}\n", "must be at least 16 characters"},
+		"bad name":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
+		"only_if":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
+		"stranger":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in signal.allowed_senders"},
+		"bad wake":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
+		"bad group":   {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
+		"health off":  {"health: {addr: \"off\"}\nwebhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {}\n", "which is off"},
+		"unknown key": {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {tsk: x}\n", `unknown setting "tsk"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, base+tc.yml)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+	writeConfig(t, "signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\n"+
+		"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: true}\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "wake needs Wake-on-LAN") {
+		t.Errorf("wake without WoL: %v", err)
+	}
+}

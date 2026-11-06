@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 	_ "time/tzdata" // TZ works in the distroless image, which has no zoneinfo
@@ -26,6 +27,7 @@ import (
 	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/webhook"
 	"github.com/tfielding/signal-ollama/internal/wol"
 )
 
@@ -71,8 +73,23 @@ func run() error {
 		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
 		defer box.Close()
 	}
+	// Hooks are served from the start, and answer "starting up" until the bot is ready.
+	var ready atomic.Pointer[bot.Bot]
+	var hooks http.Handler
+	if len(cfg.Hooks) > 0 {
+		hooks = webhook.Handler(cfg.WebhookToken, func(name, text string) error {
+			b := ready.Load()
+			switch {
+			case b == nil:
+				return errors.New("starting up, try again shortly")
+			case !b.Hook(ctx, name, text):
+				return webhook.ErrUnknownHook
+			}
+			return nil
+		})
+	}
 	// Before waiting for Ollama below, so the bot reports itself as starting, not missing.
-	if err := serveHealth(ctx, cfg, sc, llm, box); err != nil {
+	if err := serveHealth(ctx, cfg, sc, llm, box, hooks); err != nil {
 		return err
 	}
 
@@ -108,6 +125,7 @@ func run() error {
 		Tools:        tools,
 		Knowledge:    know,
 		Schedules:    schedules,
+		Hooks:        botHooks(cfg.Hooks),
 		OwnNumber:    cfg.SignalNumber,
 		Allowed:      cfg.Allowed,
 		DefaultModel: cfg.DefaultModel,
@@ -121,8 +139,9 @@ func run() error {
 		WakeWait:     cfg.WakeWait,
 		Reaction:     cfg.Reaction,
 	})
+	ready.Store(b)
 
-	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil)
+	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
 	b.StartScheduler(ctx)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()
@@ -131,6 +150,18 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// botHooks converts the configured hooks for the bot.
+func botHooks(hooks []config.Hook) map[string]bot.Hook {
+	if len(hooks) == 0 {
+		return nil
+	}
+	out := map[string]bot.Hook{}
+	for _, h := range hooks {
+		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group}
+	}
+	return out
 }
 
 // wakeEvery is how often firstModel repeats the wake-up while Ollama stays unreachable.
@@ -169,7 +200,7 @@ func firstModel(ctx context.Context, llm interface {
 
 // serveHealth starts GET /healthz on cfg.HealthAddr (unless it's off) until ctx ends. A port
 // that can't be opened is an error at startup.
-func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, llm *ollama.Client, box *toolbox.Box) error {
+func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, llm *ollama.Client, box *toolbox.Box, hooks http.Handler) error {
 	if cfg.HealthAddr == "" {
 		return nil
 	}
@@ -188,7 +219,12 @@ func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, l
 	if err != nil {
 		return fmt.Errorf("HEALTH_ADDR %s: %w", cfg.HealthAddr, err)
 	}
-	srv := &http.Server{Handler: health.Handler(checks), ReadHeaderTimeout: 5 * time.Second}
+	mux := http.NewServeMux()
+	mux.Handle("/healthz", health.Handler(checks))
+	if hooks != nil {
+		mux.Handle("/hooks/", hooks)
+	}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -200,7 +236,7 @@ func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, l
 			slog.Error("health endpoint stopped", "err", err)
 		}
 	}()
-	slog.Info("health endpoint", "addr", cfg.HealthAddr)
+	slog.Info("http endpoint", "addr", cfg.HealthAddr, "hooks", hooks != nil)
 	return nil
 }
 
