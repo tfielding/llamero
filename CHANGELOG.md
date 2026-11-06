@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Photos: send the bot a photo, with or without a question, and it looks at it. If the chat's model
+  can't see images, `OLLAMA_VISION_MODEL` (or `ollama.vision_model`) answers that message and the
+  chat keeps its model; if neither can, the bot says so. Photos are shrunk to 1600 px and sent as
+  JPEG, up to 4 per message; other files are named to the model but not read.
 - `GET /healthz` on port 8092 (`HEALTH_ADDR`, `off` to disable): 200 while the bot is connected to
   signal-cli-rest-api, 503 when it isn't, with Ollama and MCP servers reported in the body. No
   addresses or secrets in it. `signal-ollama -healthcheck` for a Docker `HEALTHCHECK` (the image

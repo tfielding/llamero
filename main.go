@@ -111,6 +111,7 @@ func run() error {
 		OwnNumber:    cfg.SignalNumber,
 		Allowed:      cfg.Allowed,
 		DefaultModel: cfg.DefaultModel,
+		VisionModel:  cfg.VisionModel,
 		SystemPrompt: cfg.SystemPrompt,
 		HistoryLimit: cfg.HistoryLimit,
 		Summarize:    cfg.Summarize,

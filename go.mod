@@ -6,6 +6,8 @@ require github.com/coder/websocket v1.8.15
 
 require go.yaml.in/yaml/v3 v3.0.6
 
+require golang.org/x/image v0.41.0
+
 require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/modelcontextprotocol/go-sdk v1.8.0

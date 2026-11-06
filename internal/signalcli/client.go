@@ -30,10 +30,19 @@ type Envelope struct {
 }
 
 type DataMessage struct {
-	Timestamp int64      `json:"timestamp"`
-	Message   string     `json:"message"`
-	GroupInfo *GroupInfo `json:"groupInfo"`
-	Quote     *Quote     `json:"quote"` // set when the message is a reply to an earlier one
+	Timestamp   int64                `json:"timestamp"`
+	Message     string               `json:"message"`
+	GroupInfo   *GroupInfo           `json:"groupInfo"`
+	Quote       *Quote               `json:"quote"`       // set when the message is a reply to an earlier one
+	Attachments []ReceivedAttachment `json:"attachments"` // photos and files sent with it
+}
+
+// ReceivedAttachment is a file someone sent; fetch its contents with Client.Attachment.
+type ReceivedAttachment struct {
+	ID          string `json:"id"`
+	ContentType string `json:"contentType"` // e.g. image/jpeg
+	Filename    string `json:"filename"`
+	Size        int64  `json:"size"`
 }
 
 // Quote is the earlier message a reply refers to.
@@ -206,6 +215,34 @@ func (c *Client) Typing(ctx context.Context, recipient string, on bool) error {
 		method = http.MethodDelete
 	}
 	return c.do(ctx, method, "/v1/typing-indicator/"+url.PathEscape(c.number), map[string]string{"recipient": recipient})
+}
+
+// MaxAttachmentBytes caps a downloaded attachment.
+const MaxAttachmentBytes = 20 << 20
+
+// Attachment downloads a received attachment's contents by its id.
+func (c *Client) Attachment(ctx context.Context, id string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/v1/attachments/"+url.PathEscape(id), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("attachment %s: %s: %s", id, resp.Status, strings.TrimSpace(string(msg)))
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxAttachmentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxAttachmentBytes {
+		return nil, fmt.Errorf("attachment %s is larger than %d MB", id, MaxAttachmentBytes>>20)
+	}
+	return data, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) error {

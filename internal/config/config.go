@@ -30,6 +30,7 @@ type Config struct {
 	SignalNumber     string          // the account registered in the container
 	OllamaURL        string          // e.g. http://192.168.1.50:11434
 	DefaultModel     string          // empty = first model Ollama reports
+	VisionModel      string          // answers messages with photos when the chat's model can't see; empty = none
 	DefaultModelAuto bool            // no model was set: main picks the first installed one
 	Allowed          map[string]bool // phone numbers (or Signal UUIDs) allowed to talk to the bot
 	DataDir          string          // where chat history is stored
@@ -71,6 +72,7 @@ func Load() (Config, error) {
 		SignalNumber: s.get("SIGNAL_NUMBER", ""),
 		OllamaURL:    strings.TrimRight(s.get("OLLAMA_URL", "http://localhost:11434"), "/"),
 		DefaultModel: s.get("OLLAMA_MODEL", ""),
+		VisionModel:  s.get("OLLAMA_VISION_MODEL", ""),
 		Allowed:      map[string]bool{},
 		DataDir:      s.get("DATA_DIR", "/data"),
 		SystemPrompt: s.get("SYSTEM_PROMPT", defaultSystemPrompt),
@@ -339,6 +341,11 @@ func (c Config) Describe() string {
 	line("ALLOWED_SENDERS", strings.Join(allowed, ", "))
 	line("OLLAMA_URL", safeURL(c.OllamaURL))
 	line("OLLAMA_MODEL", model)
+	vision := c.VisionModel
+	if vision == "" {
+		vision = "not set (photos need a chat model that can see)"
+	}
+	line("OLLAMA_VISION_MODEL", vision)
 	line("OLLAMA_TIMEOUT", c.OllamaTimeout)
 	if c.WakeMAC == nil {
 		line("OLLAMA_WOL_MAC", "not set (Wake-on-LAN off)")

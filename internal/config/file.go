@@ -29,10 +29,11 @@ type fileConfig struct {
 		AllowedSenders stringList `yaml:"allowed_senders"`
 	} `yaml:"signal"`
 	Ollama struct {
-		URL       string `yaml:"url"`
-		Model     string `yaml:"model"`
-		Timeout   string `yaml:"timeout"`
-		WakeOnLAN struct {
+		URL         string `yaml:"url"`
+		Model       string `yaml:"model"`
+		VisionModel string `yaml:"vision_model"`
+		Timeout     string `yaml:"timeout"`
+		WakeOnLAN   struct {
 			MAC  string `yaml:"mac"`
 			Addr string `yaml:"addr"`
 			Wait string `yaml:"wait"`
@@ -79,6 +80,7 @@ var fileKeys = map[string]string{
 	"ALLOWED_SENDERS":      "signal.allowed_senders",
 	"OLLAMA_URL":           "ollama.url",
 	"OLLAMA_MODEL":         "ollama.model",
+	"OLLAMA_VISION_MODEL":  "ollama.vision_model",
 	"OLLAMA_TIMEOUT":       "ollama.timeout",
 	"OLLAMA_WOL_MAC":       "ollama.wake_on_lan.mac",
 	"OLLAMA_WOL_ADDR":      "ollama.wake_on_lan.addr",
@@ -155,6 +157,7 @@ func loadFile(path string) (file, error) {
 		"ALLOWED_SENDERS":      strings.Join(fc.Signal.AllowedSenders, ","),
 		"OLLAMA_URL":           fc.Ollama.URL,
 		"OLLAMA_MODEL":         fc.Ollama.Model,
+		"OLLAMA_VISION_MODEL":  fc.Ollama.VisionModel,
 		"OLLAMA_TIMEOUT":       fc.Ollama.Timeout,
 		"OLLAMA_WOL_MAC":       fc.Ollama.WakeOnLAN.MAC,
 		"OLLAMA_WOL_ADDR":      fc.Ollama.WakeOnLAN.Addr,

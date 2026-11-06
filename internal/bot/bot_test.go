@@ -28,6 +28,16 @@ type fakeMsg struct {
 	typing    []bool
 	ch        chan string
 	reactions []string
+	files     map[string][]byte // received attachments by id
+}
+
+func (f *fakeMsg) Attachment(_ context.Context, id string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if data, ok := f.files[id]; ok {
+		return data, nil
+	}
+	return nil, fmt.Errorf("attachment %s: 404 Not Found", id)
 }
 
 func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []signalcli.Attachment) error {

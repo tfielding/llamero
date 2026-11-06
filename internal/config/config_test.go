@@ -436,3 +436,19 @@ func TestHealthAddr(t *testing.T) {
 		t.Errorf("health.addr: off: %q %v", c.HealthAddr, err)
 	}
 }
+
+func TestVisionModel(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	if c, err := Load(); err != nil || c.VisionModel != "" || !strings.Contains(c.Describe(), "OLLAMA_VISION_MODEL: not set") {
+		t.Fatalf("default: %q %v", c.VisionModel, err)
+	}
+	writeConfig(t, "ollama:\n  vision_model: gemma3:4b\n")
+	if c, err := Load(); err != nil || c.VisionModel != "gemma3:4b" || !strings.Contains(c.Describe(), "OLLAMA_VISION_MODEL: gemma3:4b\n") {
+		t.Fatalf("from the file: %q %v", c.VisionModel, err)
+	}
+	t.Setenv("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
+	if c, err := Load(); err != nil || c.VisionModel != "qwen2.5vl:7b" {
+		t.Fatalf("env wins: %q %v", c.VisionModel, err)
+	}
+}

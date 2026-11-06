@@ -6,6 +6,7 @@ import (
 	"github.com/coder/websocket"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -127,4 +128,43 @@ func TestDeadConnectionIsNoticed(t *testing.T) {
 	waitFor(t, "dead connection noticed", func() bool { ok, _, err := c.Status(); return !ok && err != nil })
 	// Backoff starts at 1s before reconnecting.
 	waitFor(t, "a new connection", func() bool { return accepted.Load() >= 2 })
+}
+
+func TestAttachments(t *testing.T) {
+	// A photo as signal-cli-rest-api (json-rpc mode) sends it on the receive websocket.
+	raw := `{"envelope":{"sourceNumber":"+15550000001","timestamp":1730000000500,"dataMessage":{"timestamp":1730000000500,
+		"message":null,"attachments":[{"contentType":"image/jpeg","filename":"IMG_0001.jpg","id":"Abc123.jpg","size":204800,
+		"width":4032,"height":3024,"caption":null,"uploadTimestamp":1730000000400}]}}}`
+	var msg struct {
+		Envelope Envelope `json:"envelope"`
+	}
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatal(err)
+	}
+	atts := msg.Envelope.DataMessage.Attachments
+	if len(atts) != 1 || atts[0].ID != "Abc123.jpg" || atts[0].ContentType != "image/jpeg" || atts[0].Size != 204800 {
+		t.Fatalf("%+v", atts)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/attachments/Abc123.jpg":
+			w.Write([]byte("jpeg bytes"))
+		case "/v1/attachments/huge.jpg":
+			w.Write(make([]byte, MaxAttachmentBytes+1))
+		default:
+			http.Error(w, `{"error":"attachment not found"}`, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "+15550000009")
+	if data, err := c.Attachment(context.Background(), "Abc123.jpg"); err != nil || string(data) != "jpeg bytes" {
+		t.Fatalf("%q %v", data, err)
+	}
+	if _, err := c.Attachment(context.Background(), "gone.jpg"); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Errorf("missing: %v", err)
+	}
+	if _, err := c.Attachment(context.Background(), "huge.jpg"); err == nil || !strings.Contains(err.Error(), "larger than 20 MB") {
+		t.Errorf("huge: %v", err)
+	}
 }

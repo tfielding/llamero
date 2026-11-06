@@ -22,6 +22,7 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
 - Swipe-to-reply works: the model sees which message you replied to
 - Markdown from the model becomes Signal formatting (bold, italic, monospace); headings become bold
   lines, tables become label/value lines
+- [Send it photos](#photos) and ask about them; a vision model answers when the chat's model can't see
 - Tools from MCP servers; pictures they return are sent to you as attachments (see [Tools](#tools-mcp))
 - A [knowledge folder](#knowledge) of notes the model always has: people, routines, how to use each tool
 - [Scheduled checks](#schedules) set up by just asking: "every weekday at 7:30 tell me what happened
@@ -173,6 +174,7 @@ Settings come from an optional config file, environment variables, or both.
 | `SIGNAL_URL` | `signal.url` | `http://signal-cli-rest-api:8080` | |
 | `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
 | `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
+| `OLLAMA_VISION_MODEL` | `ollama.vision_model` | none | Answers messages with [photos](#photos) when the chat's model can't see, e.g. `gemma3:4b` |
 | `OLLAMA_TIMEOUT` | `ollama.timeout` | `5m` | |
 | `OLLAMA_WOL_MAC` | `ollama.wake_on_lan.mac` | none | MAC address of the Ollama machine; turns on [Wake-on-LAN](#wake-on-lan) |
 | `OLLAMA_WOL_ADDR` | `ollama.wake_on_lan.addr` | `255.255.255.255:9` | Where to send the wake-up. From Docker, your LAN's broadcast address, e.g. `192.168.1.255:9` |
@@ -298,6 +300,22 @@ with ⏰. It joins the conversation, so you can follow up ("show me that one").
 - For instant alerts ("someone's at the door"), schedules are the wrong tool: they look every so
   often. Use Frigate's or Home Assistant's own notifications for those.
 
+## Photos
+
+Send a photo, with or without a question ("what plant is this?", "what does this error mean?"),
+and the bot looks at it.
+
+- **Which model sees it:** the chat's model if it can see images. Otherwise `OLLAMA_VISION_MODEL`
+  answers that one message, and the chat stays on its model, so you can keep a strong text model
+  like gpt-oss for chat and a small vision model for photos. If neither can see, the bot says so
+  instead of answering blind.
+- **The photo itself isn't kept:** later messages have the reply describing it, so "is it
+  poisonous?" works as a follow-up. Send it again to ask about a detail the reply didn't cover.
+- Photos are shrunk to at most 1600 pixels on the long side and sent as JPEG (from JPEG, PNG, WebP
+  or GIF); up to 4 per message.
+- Other files (PDFs, videos, voice notes) aren't read; the bot says so, and answers any text with them.
+- signal-cli-rest-api keeps received files in its data folder; signal-ollama doesn't delete them.
+
 ## Long chats
 
 Each chat keeps its last `HISTORY_LIMIT` messages word for word. Past that, the older messages are
@@ -363,8 +381,8 @@ Assistant:
   tools, and creating or deleting a schedule needs your approval.
 - **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
   removes credentials from URLs.
-- **Local only.** Chats and knowledge notes only go to your Ollama server. Chat history is stored
-  unencrypted in `data`.
+- **Local only.** Chats, photos and knowledge notes only go to your Ollama server. Chat history is
+  stored unencrypted in `data`; photos aren't stored by signal-ollama.
 - Runs as a non-root user in a minimal image with no shell.
 - signal-cli-rest-api has no authentication. Keep its port 8080 off the internet; ideally don't
   publish it at all and let containers talk over the Docker network.

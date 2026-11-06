@@ -15,6 +15,7 @@ import (
 
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
 )
@@ -34,7 +35,7 @@ type response struct {
 }
 
 // respond produces the reply for one message.
-func (b *Bot) respond(ctx context.Context, sender, text string) response {
+func (b *Bot) respond(ctx context.Context, sender, text string, atts []signalcli.ReceivedAttachment) response {
 	chat, err := b.store.Load(sender)
 	if err != nil {
 		slog.Error("load history", "err", err)
@@ -55,6 +56,26 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 		}
 	} else if strings.HasPrefix(text, "/") {
 		return response{text: b.command(ctx, sender, &chat, text)}
+	}
+
+	var photos [][]byte
+	if len(atts) > 0 {
+		var note string
+		photos, note = b.loadPhotos(ctx, atts)
+		if len(photos) == 0 && text == "" {
+			for _, a := range atts {
+				if strings.HasPrefix(strings.ToLower(a.ContentType), "image/") {
+					return response{text: "Sorry, I couldn't read that photo. Try sending it again."}
+				}
+			}
+			return response{text: "I can only look at photos for now, not files, videos or voice notes."}
+		}
+		if text == "" {
+			text = photoText
+		}
+		if note != "" {
+			text += "\n\n" + note
+		}
 	}
 
 	model := chat.Model
@@ -78,6 +99,20 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 		}
 	}
 	info, _ := b.llm.Info(ctx, model)
+	if len(photos) > 0 && !info.Has("vision") {
+		// The chat's model can't see: the vision model answers this message, the chat keeps its model.
+		if b.opt.VisionModel == "" {
+			return response{text: noVisionText(model)}
+		}
+		vinfo, err := b.llm.Info(ctx, b.opt.VisionModel)
+		if err != nil || !vinfo.Has("vision") {
+			slog.Warn("vision model can't see pictures or isn't installed", "model", b.opt.VisionModel, "err", err)
+			return response{text: fmt.Sprintf("OLLAMA_VISION_MODEL %s can't see pictures, or isn't installed in Ollama. "+
+				"Check `ollama list`, and that it's a vision model.", b.opt.VisionModel)}
+		}
+		slog.Info("photo: using the vision model", "model", b.opt.VisionModel, "chat_model", model, "photos", len(photos))
+		model, info = b.opt.VisionModel, vinfo
+	}
 	think := b.thinkValue(ctx, model, chat.Think)
 	var tools []toolbox.Tool
 	if info.Has("tools") {
@@ -88,7 +123,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 			tools = append(tools, scheduleTools()...)
 		}
 	}
-	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: text})
+	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: text, Images: photos})
 
 	slog.Info("asking model", "model", model, "history", len(chat.History), "think", chat.Think, "tools", len(tools))
 	start := time.Now()
@@ -128,8 +163,13 @@ func (b *Bot) respond(ctx context.Context, sender, text string) response {
 	if len(images) > 0 {
 		saved += fmt.Sprintf("\n\n[%d image(s) were sent to the user with this reply.]", len(images))
 	}
+	asked := text
+	if len(photos) > 0 {
+		// The photo itself isn't kept: later messages have the reply describing it.
+		asked += fmt.Sprintf("\n\n[The user sent %d photo(s) with this message.]", len(photos))
+	}
 	chat.History = trim(append(chat.History,
-		ollama.Message{Role: "user", Content: text},
+		ollama.Message{Role: "user", Content: asked},
 		ollama.Message{Role: "assistant", Content: strings.TrimSpace(saved)}), b.historyCap())
 	if err := b.store.Save(sender, chat); err != nil {
 		slog.Error("save history", "err", err)

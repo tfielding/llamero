@@ -12,6 +12,7 @@ signal:
 ollama:
   url: http://192.168.1.50:11434
   model: llama3.2:latest                # default: the first installed model
+  # vision_model: gemma3:4b             # answers photos when the chat's model can't see
   # timeout: 5m
   # wake_on_lan:
   #   mac: aa:bb:cc:dd:ee:ff

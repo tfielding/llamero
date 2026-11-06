@@ -23,6 +23,7 @@ type Messenger interface {
 	Send(ctx context.Context, recipient, text string, styled bool, attachments []signalcli.Attachment) error
 	Typing(ctx context.Context, recipient string, on bool) error
 	React(ctx context.Context, recipient, targetAuthor string, ts int64, emoji string, remove bool) error
+	Attachment(ctx context.Context, id string) ([]byte, error)
 }
 
 // LLM is the model side (implemented by ollama.Client).
@@ -50,6 +51,7 @@ type Options struct {
 	OwnNumber       string
 	Allowed         map[string]bool
 	DefaultModel    string
+	VisionModel     string // answers messages with photos when the chat's model can't see; empty = none
 	SystemPrompt    string
 	HistoryLimit    int
 	Summarize       bool                        // fold messages past HistoryLimit into a running summary instead of dropping them
@@ -79,9 +81,10 @@ type Bot struct {
 
 // message is an incoming message waiting to be answered, or a scheduled check to run.
 type message struct {
-	text     string
-	ts       int64 // Signal timestamp, which identifies the message for reactions
-	schedule int   // if set, run this schedule instead of answering text
+	text        string
+	attachments []signalcli.ReceivedAttachment // photos and files sent with it
+	ts          int64                          // Signal timestamp, which identifies the message for reactions
+	schedule    int                            // if set, run this schedule instead of answering text
 }
 
 type activity struct {
@@ -117,12 +120,16 @@ func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
 	if !ok {
 		return
 	}
+	atts := env.DataMessage.Attachments
 	// While a tool waits for approval, the next message is the answer. It's checked
 	// before the quote is added: a swipe-reply "yes" to the prompt is still a yes.
-	if b.answer(sender, text) {
+	if len(atts) == 0 && b.answer(sender, text) {
 		return
 	}
-	msg := message{text: withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber), ts: env.DataMessage.Timestamp}
+	if text != "" {
+		text = withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber)
+	}
+	msg := message{text: text, attachments: atts, ts: env.DataMessage.Timestamp}
 	if msg.ts == 0 {
 		msg.ts = env.Timestamp
 	}
@@ -172,7 +179,7 @@ func (b *Bot) accept(env signalcli.Envelope) (sender, text string, ok bool) {
 		return "", "", false
 	}
 	text = strings.TrimSpace(dm.Message)
-	if text == "" {
+	if text == "" && len(dm.Attachments) == 0 {
 		return "", "", false
 	}
 	sender = env.SourceNumber
@@ -237,12 +244,12 @@ func (b *Bot) process(ctx context.Context, sender string, msg message, queued in
 	if strings.HasPrefix(text, "/") {
 		kind = "command"
 	}
-	slog.Info("message received", "from", mask(sender), "kind", kind, "chars", len(text), "queued", queued)
+	slog.Info("message received", "from", mask(sender), "kind", kind, "chars", len(text), "attachments", len(msg.attachments), "queued", queued)
 	unreact := func() {}
 	if kind == "chat" || isRetry(text) {
 		unreact = b.react(ctx, sender, msg.ts)
 	}
-	r := b.respond(ctx, sender, text)
+	r := b.respond(ctx, sender, text, msg.attachments)
 	if r.text == "" && len(r.images) == 0 {
 		unreact()
 		return
