@@ -122,6 +122,9 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []signalcli
 		if b.opt.Schedules != nil {
 			tools = append(tools, scheduleTools()...)
 		}
+		if b.feedbackOn() {
+			tools = append(tools, b.feedbackTool())
+		}
 	}
 	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: text, Images: photos})
 
@@ -358,9 +361,12 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 			start := time.Now()
 			var out toolbox.Output
 			var err error
-			if isScheduleTool(name) {
+			switch {
+			case isScheduleTool(name):
 				out = b.callScheduleTool(sender, name, tc.Function.Arguments)
-			} else {
+			case name == toolHookFeedback:
+				out = b.callFeedbackTool(tc.Function.Arguments)
+			default:
 				out, err = b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
 			}
 			b.setTool(sender, "")

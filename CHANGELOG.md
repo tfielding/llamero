@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Hooks learn from your feedback: tell the bot a 🔔 message was a false alarm (or right, or that
+  something was missed), e.g. by replying to it, and it saves your verdict with the event
+  (`hook_feedback` tool, no approval needed). Later checks of that hook get your recent verdicts as
+  examples. Kept in `data/learned/<hook>.md`; new `/learned` command lists them, `/learned clear
+  <hook>` forgets them.
+
 ### Fixed
 - When the model uses tools and then writes nothing, it's asked once more for an answer before the
   bot gives up. Hooks and scheduled checks no longer send the chat's "Sorry, the model returned no

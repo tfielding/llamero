@@ -126,7 +126,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 			return
 		}
 	}
-	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events))
+	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events, b.learnedForCheck(h.Name)))
 	switch {
 	case stopped:
 		slog.Info("hook check stopped", "hook", h.Name)
@@ -149,6 +149,9 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		return
 	}
 	b.sendHook(ctx, to, response{text: fmt.Sprintf("🔔 **%s**\n\n%s", h.Name, answer), fromModel: true, images: images})
+	b.mu.Lock()
+	b.lastHook[h.Name] = hookResult{events: events, answer: answer} // what "that was a false alarm" refers to
+	b.mu.Unlock()
 	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
 	for _, r := range to {
 		b.remember(r, fmt.Sprintf("(Event from %s: %s)", h.Name, strings.ReplaceAll(events, "\n", " ")), answer, len(images))
@@ -180,9 +183,10 @@ func eventList(run *hookRun) string {
 }
 
 // hookTask is the message the model gets for a hook's events.
-func hookTask(h Hook, events string) string {
+func hookTask(h Hook, events, learned string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "(Sent by another system through the hook %q, set up by the user. This is not a new message from them.)\n", h.Name)
+	sb.WriteString(learned)
 	fmt.Fprintf(&sb, "What happened:\n%s\n\n", events)
 	fmt.Fprintf(&sb, "Do this now, using your tools to look things up: %s\n", h.Task)
 	if h.OnlyIf != "" {

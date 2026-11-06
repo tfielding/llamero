@@ -126,6 +126,7 @@ func run() error {
 		Knowledge:    know,
 		Schedules:    schedules,
 		Hooks:        botHooks(cfg.Hooks),
+		LearnedDir:   learnedDir(cfg),
 		OwnNumber:    cfg.SignalNumber,
 		Allowed:      cfg.Allowed,
 		DefaultModel: cfg.DefaultModel,
@@ -150,6 +151,14 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// learnedDir is where verdicts on hook messages are kept: in the data folder, when there are hooks.
+func learnedDir(cfg config.Config) string {
+	if len(cfg.Hooks) == 0 {
+		return ""
+	}
+	return filepath.Join(cfg.DataDir, "learned")
 }
 
 // botHooks converts the configured hooks for the bot.

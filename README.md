@@ -48,12 +48,14 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
 | `/knowledge` | Which notes are loaded from the knowledge folder, and when each is used |
 | `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
+| `/learned` | What [hooks](#hooks) learned from your feedback on 🔔 messages |
+| `/learned clear <hook>` | Forget what one hook learned |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
 | `/wake` | Wake the Ollama machine (Wake-on-LAN) |
 | `/help` | This list |
 
-`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules` and `/settings` answer right
-away, even while a reply is being written.
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/learned` and `/settings` answer
+right away, even while a reply is being written.
 
 ## What it answers
 
@@ -350,6 +352,14 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
   **503** still starting up.
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
+
+**Learning from your feedback:** when a 🔔 message is wrong, say so, e.g. by replying to it with
+"false alarm, that's the plant". The model saves your verdict with the event and its own answer, and
+later checks of that hook get your recent verdicts as examples, so the same mistake is less likely.
+You can also say a message was right, or that something should have been reported. Verdicts are
+kept per hook (the latest 30) in `data/learned/<hook>.md`, a Markdown file you can read or edit;
+`/learned` lists them and `/learned clear <hook>` forgets them. Nothing about the kind of event is
+built in: a camera hook learns about false detections, a sensor hook about whatever you correct.
 
 **From Home Assistant:** a `rest_command` that any automation can call:
 

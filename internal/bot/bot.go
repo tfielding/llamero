@@ -47,6 +47,7 @@ type Options struct {
 	Knowledge       *knowledge.Base // notes from the knowledge folder; nil = none
 	Schedules       *schedule.Store // scheduled checks; nil = off
 	Hooks           map[string]Hook // hooks by name; nil = none
+	LearnedDir      string          // where verdicts on hook messages are saved (hook_feedback); empty = off
 	Location        *time.Location  // time zone for schedules; nil = time.Local
 	ScheduleTick    time.Duration   // how often to look for due schedules (default 15s)
 	OwnNumber       string
@@ -76,6 +77,8 @@ type Bot struct {
 	queues    map[string]chan message // one worker per sender keeps replies in order
 	scheduled map[string]bool         // scheduled runs waiting or running, by "chat#id"
 	hookRuns  map[string]*hookRun     // hook events waiting for their run, by hook
+	lastHook  map[string]hookResult   // each hook's last checked run, for feedback on it
+	learnMu   sync.Mutex              // guards the learned files
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
@@ -113,7 +116,7 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
-		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}}
+		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, lastHook: map[string]hookResult{}}
 }
 
 // Handle is called for every incoming envelope. It never blocks on the model.
