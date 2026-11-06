@@ -337,7 +337,9 @@ func TestNothingToReport(t *testing.T) {
 	for in, want := range map[string]bool{
 		"NOTHING_TO_REPORT": true, "`NOTHING_TO_REPORT`": true, "nothing_to_report.": true,
 		"NOTHING_TO_REPORT - the door is closed": true,
-		"The garage door is open. (not NOTHING_TO_REPORT, it's been open for an hour and you should check it)": false,
+		"NOTHING_TO_REPORT. A car drove along the street and parked across the road for a few minutes before leaving.": true,
+		"**NOTHING_TO_REPORT**\n\nOnly a delivery van passed by on the street, nobody came to the door.":               true,
+		"The garage door is open. (not NOTHING_TO_REPORT, it's been open for an hour and you should check it)":         false,
 		"All quiet": false,
 	} {
 		if got := nothing(in); got != want {

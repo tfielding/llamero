@@ -325,7 +325,7 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 	}
 	b.scheduleWorked(sender, *it)
 	answer = stripImageNotes(answer)
-	if it.OnlyIf != "" && len(images) == 0 && nothing(answer) {
+	if it.OnlyIf != "" && nothing(answer) { // pictures it looked at to decide don't count
 		slog.Info("scheduled check: nothing to report", "id", id, "took", time.Since(start).Round(100*time.Millisecond))
 		return
 	}
@@ -447,7 +447,8 @@ func scheduledTask(it schedule.Item, when string) string {
 // nothing reports whether the model answered that there's nothing to report.
 func nothing(answer string) bool {
 	a := strings.Trim(strings.TrimSpace(answer), "`*_. \"'")
-	return strings.EqualFold(a, nothingToReport) || (len(a) < 60 && strings.Contains(strings.ToUpper(a), nothingToReport))
+	up := strings.ToUpper(a)
+	return strings.HasPrefix(up, nothingToReport) || (len(a) < 60 && strings.Contains(up, nothingToReport))
 }
 
 // wakeQuietly wakes the Ollama machine without messaging the user, and waits for it.

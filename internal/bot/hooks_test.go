@@ -163,3 +163,29 @@ func TestNoAnswerAfterTools(t *testing.T) {
 		t.Errorf("hook: %q", got)
 	}
 }
+
+func TestHookOnlyIfWithPictures(t *testing.T) {
+	// The model looks at a snapshot to decide, then finds nothing to report: still silent.
+	b, m, l, ft := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "a person is at the door"})
+	ft.out = []toolbox.Image{{MIME: "image/jpeg", Data: []byte("jpg")}}
+	l.toolCall, l.answer = call("get_state", map[string]any{"name": "front_door"}), "NOTHING_TO_REPORT. Only a car passed on the street."
+	b.Hook(b.ctx, "door", "car on front_door")
+	expectSilence(t, m)
+	if ft.called() != 1 {
+		t.Fatalf("snapshot tool called %d times", ft.called())
+	}
+
+	// When it does report, the picture comes with the message.
+	l.mu.Lock()
+	l.answer = "A person is at the door."
+	l.mu.Unlock()
+	b.Hook(b.ctx, "door", "person on front_door")
+	if got := reply(t, m); !strings.Contains(got, "A person is at the door.") {
+		t.Fatalf("got %q", got)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.attached) != 1 || m.attached[0] != "image/jpeg image-1.jpg" {
+		t.Errorf("attached: %v", m.attached)
+	}
+}

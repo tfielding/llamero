@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
   bot gives up. Hooks and scheduled checks no longer send the chat's "Sorry, the model returned no
   answer… Try asking again": a hook sends its events marked "not checked", and a schedule reports
   a failed run.
+- Checks with an "only if" (hooks and schedules) stayed silent only if the model hadn't looked at any
+  pictures: one that fetched a snapshot to decide sent it even when the answer was "nothing to
+  report". Now its answer decides. An answer that starts with NOTHING_TO_REPORT and gives a reason
+  also counts as nothing to report.
 
 ## [0.3.0] - 2026-11-06
 

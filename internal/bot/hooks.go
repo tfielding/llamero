@@ -144,7 +144,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		return
 	}
 	answer = stripImageNotes(answer)
-	if h.OnlyIf != "" && len(images) == 0 && nothing(answer) {
+	if h.OnlyIf != "" && nothing(answer) { // pictures it looked at to decide don't count
 		slog.Info("hook check: nothing to report", "hook", h.Name, "took", time.Since(start).Round(100*time.Millisecond))
 		return
 	}
