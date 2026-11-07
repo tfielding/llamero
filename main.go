@@ -168,7 +168,8 @@ func botHooks(hooks []config.Hook) map[string]bot.Hook {
 	}
 	out := map[string]bot.Hook{}
 	for _, h := range hooks {
-		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown}
+		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown,
+			Model: h.Model, Think: h.Think, Tools: h.Tools}
 	}
 	return out
 }

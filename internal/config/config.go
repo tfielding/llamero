@@ -69,6 +69,9 @@ type Hook struct {
 	Wake     bool          // wake the Ollama machine if it's asleep
 	Group    time.Duration // events this soon after the first are handled together
 	Cooldown time.Duration // after a message, events (with the same key) are skipped for this long; 0 = off
+	Model    string        // the model for its checks; empty = the recipient's chat model
+	Think    string        // thinking for its checks (on, off, low, medium, high); empty = the chat's setting
+	Tools    []string      // the only tools its checks get; empty = every read-only tool
 }
 
 const (
@@ -209,9 +212,20 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 		if !validHookName(name) {
 			return nil, fmt.Errorf("webhooks.hooks in %s: %q is not a valid hook name (letters, digits, - and _)", s.f.path, name)
 		}
-		h := Hook{Name: name, Task: strings.TrimSpace(fh.Task), OnlyIf: strings.TrimSpace(fh.OnlyIf), Group: defaultHookGroup}
+		h := Hook{Name: name, Task: strings.TrimSpace(fh.Task), OnlyIf: strings.TrimSpace(fh.OnlyIf), Group: defaultHookGroup,
+			Model: strings.TrimSpace(fh.Model), Think: strings.ToLower(strings.TrimSpace(fh.Think)), Tools: fh.Tools}
 		if h.OnlyIf != "" && h.Task == "" {
 			return nil, fmt.Errorf("%s: only_if needs a task (without a task, events are sent on unchecked)", where)
+		}
+		if h.Task == "" && (h.Model != "" || h.Think != "" || len(h.Tools) > 0) {
+			return nil, fmt.Errorf("%s: model, think and tools need a task (without a task, events are sent on unchecked)", where)
+		}
+		switch h.Think {
+		case "", "on", "off", "low", "medium", "high":
+		case "true", "false": // YAML booleans, as in think: false
+			h.Think = map[string]string{"true": "on", "false": "off"}[h.Think]
+		default:
+			return nil, fmt.Errorf("%s: think must be on, off, low, medium or high", where)
 		}
 		for _, r := range fh.To {
 			if !c.Allowed[r] {
@@ -538,6 +552,15 @@ func (c Config) Describe() string {
 		}
 		if h.Wake {
 			parts = append(parts, "wakes Ollama")
+		}
+		if h.Model != "" {
+			parts = append(parts, "model "+h.Model)
+		}
+		if h.Think != "" {
+			parts = append(parts, "think "+h.Think)
+		}
+		if len(h.Tools) > 0 {
+			parts = append(parts, "tools "+strings.Join(h.Tools, ", "))
 		}
 		parts = append(parts, "group "+h.Group.String())
 		if h.Cooldown > 0 {

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- Hook checks no longer include the chat history: every model call has less to read, and an
+  event check doesn't need your conversation. The result still joins the conversation afterwards.
+
 ### Added
 - Hooks learn from your feedback: tell the bot a 🔔 message was a false alarm (or right, or that
   something was missed), e.g. by replying to it, and it saves your verdict with the event
@@ -15,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 - Hook `cooldown`: after a message, the hook skips events with the same `key` (e.g. a camera, sent as
   `"key"` in the JSON or `?key=`) for that long, without asking the model. Only a sent message starts
   it.
+- Hook `model`, `think` and `tools`: a hook's checks can use their own model, thinking setting
+  and short list of tools, for quicker checks. Each model call reads every tool's description, so
+  fewer tools means faster rounds.
 - `/hooks`: the latest hook checks (up to 20 since the bot started) and what each decided: sent,
   nothing to report with the model's reason, sent unchecked and why, or skipped while cooling down.
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -305,7 +306,7 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 	}
 	slog.Info("scheduled check", "id", id)
 	answer, images, stopped, err := b.checkRun(ctx, sender, fmt.Sprintf("running schedule %d", id),
-		scheduledTask(*it, b.specText(it.When)))
+		scheduledTask(*it, b.specText(it.When)), checkOptions{})
 	done()
 	switch {
 	case stopped:
@@ -341,7 +342,16 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 // checkRun runs the model for a check nobody is waiting on (a schedule or a hook) in sender's
 // chat, with read-only tools: no one is there to approve an action. stopped reports that /stop
 // ended it (which already replied).
-func (b *Bot) checkRun(ctx context.Context, sender, task, content string) (answer string, images []toolbox.Image, stopped bool, err error) {
+// checkOptions change how a check runs; the zero value runs it like a chat message from sender,
+// with read-only tools.
+type checkOptions struct {
+	model     string   // instead of the chat's model
+	think     string   // instead of the chat's thinking setting
+	tools     []string // only these tools (by name)
+	noHistory bool     // without the chat's history and summary
+}
+
+func (b *Bot) checkRun(ctx context.Context, sender, task, content string, opt checkOptions) (answer string, images []toolbox.Image, stopped bool, err error) {
 	chat, err := b.store.Load(sender)
 	if err != nil {
 		return "", nil, false, fmt.Errorf("load history: %w", err)
@@ -350,14 +360,37 @@ func (b *Bot) checkRun(ctx context.Context, sender, task, content string) (answe
 	if model == "" {
 		model = b.opt.DefaultModel
 	}
+	if opt.model != "" {
+		model = opt.model
+	}
+	think := chat.Think
+	if opt.think != "" {
+		think = opt.think
+	}
 	info, _ := b.llm.Info(ctx, model)
 	var tools []toolbox.Tool
 	if b.opt.Tools != nil && info.Has("tools") {
+		want := map[string]bool{}
+		for _, name := range opt.tools {
+			want[name] = true
+		}
 		for _, t := range b.opt.Tools.Tools(ctx) {
-			if t.ReadOnly {
+			if t.ReadOnly && (len(want) == 0 || want[t.Name]) {
 				tools = append(tools, t)
+				delete(want, t.Name)
 			}
 		}
+		if len(want) > 0 {
+			missing := make([]string, 0, len(want))
+			for name := range want {
+				missing = append(missing, name)
+			}
+			sort.Strings(missing)
+			slog.Warn("check: tools not available (unknown, not read-only, or their server is down)", "task", task, "tools", missing)
+		}
+	}
+	if opt.noHistory {
+		chat.History, chat.Summary = nil, ""
 	}
 	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: content})
 
@@ -366,8 +399,8 @@ func (b *Bot) checkRun(ctx context.Context, sender, task, content string) (answe
 	defer cancel()
 	b.active[sender] = activity{model: model, started: time.Now(), cancel: cancel, task: task}
 	b.mu.Unlock()
-	slog.Info("check", "task", task, "model", model, "tools", len(tools))
-	answer, images, _, err = b.run(callCtx, sender, model, msgs, b.thinkValue(ctx, model, chat.Think), tools, info.Has("vision"))
+	slog.Info("check", "task", task, "model", model, "think", think, "tools", len(tools), "history", !opt.noHistory)
+	answer, images, _, err = b.run(callCtx, sender, model, msgs, b.thinkValue(ctx, model, think), tools, info.Has("vision"))
 	b.mu.Lock()
 	delete(b.active, sender)
 	b.mu.Unlock()

@@ -22,6 +22,9 @@ type Hook struct {
 	Wake     bool          // wake the Ollama machine if it's asleep, instead of sending the events unchecked
 	Group    time.Duration // events within this long of the first are handled together
 	Cooldown time.Duration // after a message, events with the same key are skipped for this long; 0 = off
+	Model    string        // the model for its checks; empty = the recipient's chat model
+	Think    string        // thinking for its checks; empty = the chat's setting
+	Tools    []string      // the only tools its checks get; empty = every read-only tool
 }
 
 const (
@@ -141,7 +144,9 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 			return
 		}
 	}
-	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events, b.learnedForCheck(h.Name)))
+	// Checks don't need the chat: no history, so every model call has less to read.
+	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events, b.learnedForCheck(h.Name)),
+		checkOptions{model: h.Model, think: h.Think, tools: h.Tools, noHistory: true})
 	switch {
 	case stopped:
 		slog.Info("hook check stopped", "hook", h.Name)

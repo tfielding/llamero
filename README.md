@@ -200,7 +200,7 @@ Settings come from an optional config file, environment variables, or both.
 | `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
 | `WEBHOOK_TOKEN` | `webhooks.token` | none | Token [hook](#hooks) callers send as `Authorization: Bearer <token>`; at least 16 characters, required with hooks |
-| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group`, `cooldown` |
+| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group`, `cooldown`, `model`, `think`, `tools` |
 | `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
 | `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
@@ -343,8 +343,9 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
 - **`only_if`:** report only when this is true; otherwise the bot stays silent. Without it, every
   event gets a message.
 - **`to`:** who gets the messages, from `signal.allowed_senders`; default everyone in it. The model
-  runs once, in the first one's chat and with their model; the result goes to all of them and
-  joins each one's conversation, so "show me that" works afterwards.
+  runs once, with the first one's model (unless `model` is set) but without their chat history;
+  the result goes to all of them and joins each one's conversation, so "show me that" works
+  afterwards.
 - **`group`:** events within this long of the first are checked together in one run (default
   `30s`, at most `10m`, `0` for each on its own), so one person walking past three cameras is one
   message. Up to 10 events are listed per run; more are counted.
@@ -353,6 +354,15 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   not five. Skipped events aren't checked, so they cost no model time; events with another key
   (another camera) still are. Only a sent message starts a cooldown, not a check that found nothing.
   The catch: a second, different arrival on the same key within the cooldown isn't reported.
+- **`model`:** the model for this hook's checks, e.g. a smaller, faster vision model, while chat
+  keeps the bigger one. Default: the recipient's chat model.
+- **`think`:** thinking for this hook's checks: `off`, `on`, `low`, `medium` or `high` (what the
+  model supports). Default: the chat's `/think` setting. `off` saves time on simple rules.
+- **`tools`:** the only tools this hook's checks get, by name as in the logs, e.g.
+  `[review_alert, get_camera_frame]`. Default: every read-only tool. Every model call reads every
+  tool's description, so a short list makes each round quicker and keeps the model from wandering
+  off. Tools that aren't read-only are never given to hooks, even if listed; names that aren't
+  available are logged at each check.
 - **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
   it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
   than nothing.

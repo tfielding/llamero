@@ -77,6 +77,9 @@ type fileHook struct {
 	Wake     string     `yaml:"wake"`
 	Group    string     `yaml:"group"`
 	Cooldown string     `yaml:"cooldown"`
+	Model    string     `yaml:"model"`
+	Think    string     `yaml:"think"`
+	Tools    stringList `yaml:"tools"`
 }
 
 type fileServer struct {

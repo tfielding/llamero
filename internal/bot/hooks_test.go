@@ -350,3 +350,61 @@ func TestHooksCommand(t *testing.T) {
 		t.Errorf("not newest first:\n%s", got)
 	}
 }
+
+func TestHookLeanRun(t *testing.T) {
+	b, m, l, ft := setupHooks(t,
+		Hook{Name: "door", Task: "Check the door.", Model: "small-vision", Think: "off", Tools: []string{"get_state", "turn_off", "nope"}},
+		Hook{Name: "plain", Task: "Check the door."})
+	ft.tools = append(ft.tools, toolbox.Tool{Name: "get_weather", Schema: lightSchema, ReadOnly: true})
+	l.answer = "Someone is there."
+	b.Handle(dm(me, "remember the secret word is pineapple"))
+	reply(t, m)
+
+	// The hook's model, thinking and tools; no chat history.
+	b.Hook(b.ctx, "door", "person on front_door", "")
+	reply(t, m)
+	l.mu.Lock()
+	model, think, offered := l.model, l.think, strings.Join(l.offered, ",")
+	var prompt strings.Builder
+	for _, msg := range l.last {
+		prompt.WriteString(msg.Content + "\n")
+	}
+	l.mu.Unlock()
+	if model != "small-vision" || think != false || offered != "get_state" { // turn_off isn't read-only; nope doesn't exist
+		t.Errorf("model %q, think %v, tools %q", model, think, offered)
+	}
+	if strings.Contains(prompt.String(), "pineapple") || !strings.Contains(prompt.String(), "person on front_door") {
+		t.Errorf("prompt:\n%s", prompt.String())
+	}
+
+	// Without the settings: the chat's model and every read-only tool, still without history.
+	b.Hook(b.ctx, "plain", "person on front_door", "")
+	reply(t, m)
+	l.mu.Lock()
+	model, offered = l.model, strings.Join(l.offered, ",")
+	prompt.Reset()
+	for _, msg := range l.last {
+		prompt.WriteString(msg.Content + "\n")
+	}
+	l.mu.Unlock()
+	if model == "small-vision" || offered != "get_state,get_weather" || strings.Contains(prompt.String(), "pineapple") {
+		t.Errorf("plain: model %q, tools %q, prompt:\n%s", model, offered, prompt.String())
+	}
+
+	// The results still go into the chat, for follow-ups.
+	saved := func() bool {
+		chat, _ := b.store.Load(me)
+		for _, msg := range chat.History {
+			if strings.Contains(msg.Content, "Event from plain") {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 0; i < 50 && !saved(); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !saved() {
+		t.Error("hook result not in the chat's history")
+	}
+}

@@ -39,6 +39,9 @@ ollama:
 #       # group: 30s                    # events this close together are checked in one run
 #       # wake: false                   # wake the Ollama machine for it (needs wake_on_lan)
 #       # cooldown: 5m                  # after a message, skip events with the same key this long
+#       # model: gemma3:12b             # the model for its checks; default: the chat's
+#       # think: off                    # thinking for its checks; default: the chat's /think
+#       # tools: [get_snapshot]         # only these tools; default: every read-only tool
 #     leak: {}                          # no task: events are sent on as they are
 # knowledge:                           # notes for the model: .md files in this folder
 #   dir: /config/knowledge
