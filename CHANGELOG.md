@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-07
+
+### Added
+- `ollama.backup_url` (`OLLAMA_BACKUP_URL`): another address for Ollama, used when the main one
+  can't be reached, e.g. a laptop's VPN address while it's away from home. The main address is
+  tried first again after a minute.
+
+### Changed
+- An Ollama address that doesn't answer now fails after 3 seconds instead of waiting for the
+  request timeout, so "Ollama is offline" (and Wake-on-LAN, and unchecked hook events) happen
+  right away.
+
 ## [0.2.0] - 2026-11-07
 
 ### Added

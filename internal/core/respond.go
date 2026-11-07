@@ -545,7 +545,7 @@ const wakeFailedText = "Sent a wake-up, but Ollama didn't come online in time. T
 // unreachable reports whether err means Ollama couldn't be contacted (as opposed to a slow or failed reply).
 func unreachable(err error) bool {
 	var oe *net.OpError
-	return errors.As(err, &oe) && !oe.Timeout()
+	return errors.As(err, &oe) && (oe.Op == "dial" || !oe.Timeout()) // couldn't connect, even if that timed out
 }
 
 func short(err error) string {

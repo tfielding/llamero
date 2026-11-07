@@ -230,6 +230,7 @@ Settings come from an optional config file, environment variables, or both.
 | `TELEGRAM_ALLOWED_SENDERS` | `transports.telegram.allowed_senders` | required with Telegram | Telegram user ids allowed to use the bot; comma-separated, or a list in the file |
 | `TELEGRAM_URL` | `transports.telegram.url` | `https://api.telegram.org` | Only for a self-hosted Bot API server |
 | `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
+| `OLLAMA_BACKUP_URL` | `ollama.backup_url` | none | Another address for Ollama, used when `OLLAMA_URL` can't be reached: e.g. a laptop's VPN address while it's away from home (see [Ollama on a laptop](#ollama-on-a-laptop)) |
 | `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
 | `OLLAMA_VISION_MODEL` | `ollama.vision_model` | none | Answers messages with [photos](#photos) when the chat's model can't see, e.g. `gemma3:4b` |
 | `OLLAMA_TIMEOUT` | `ollama.timeout` | `5m` | |
@@ -499,6 +500,25 @@ answers as usual. `/stop` cancels the wait; `/wake` sends a wake-up on demand.
   `192.168.1.255:9`), or use `network_mode: host`.
 - Without `OLLAMA_MODEL`, the bot needs Ollama at startup to pick a model; it sends a wake-up then
   too, and every 5 minutes while it waits.
+
+## Ollama on a laptop
+
+If Ollama runs on a laptop you take with you, give Llamero both of its addresses:
+
+```yaml
+ollama:
+  url: http://192.168.1.50:11434          # at home, on the LAN
+  backup_url: http://10.6.0.2:11434       # away, over your VPN (WireGuard, Tailscale, ...)
+```
+
+- Each request goes to `url` first. If nothing answers within 3 seconds, it goes to `backup_url`,
+  and `url` is skipped for a minute before being tried first again. The log says when it switches.
+- The VPN has to let your home server reach the laptop, not just the laptop reach home: check with
+  `curl http://<laptop-vpn-ip>:11434/api/version` from the server while the laptop is away. Ollama
+  must listen on all interfaces (`OLLAMA_HOST=0.0.0.0`), and the laptop's firewall must allow it.
+- A laptop that's asleep can't answer at either address; Wake-on-LAN doesn't work over a VPN.
+  Then chats get "Ollama is offline", and [hooks](#hooks) send their events marked "not checked"
+  rather than dropping them.
 
 ## Health
 

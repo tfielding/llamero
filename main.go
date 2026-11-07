@@ -66,7 +66,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	llm := ollama.New(cfg.OllamaURL, cfg.OllamaTimeout)
+	var backups []string
+	if cfg.OllamaBackupURL != "" {
+		backups = append(backups, cfg.OllamaBackupURL)
+	}
+	llm := ollama.New(cfg.OllamaURL, cfg.OllamaTimeout, backups...)
 	var wake func(context.Context) error
 	if cfg.WakeMAC != nil {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }

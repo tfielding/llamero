@@ -16,6 +16,7 @@ transports:                             # the messaging apps the bot talks on
 
 ollama:
   url: http://192.168.1.50:11434
+  # backup_url: http://10.6.0.2:11434     # used when url can't be reached, e.g. over a VPN
   model: llama3.2:latest                # default: the first installed model
   # vision_model: gemma3:4b             # answers photos when the chat's model can't see
   # timeout: 5m

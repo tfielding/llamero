@@ -32,6 +32,7 @@ type Config struct {
 	Signal           Signal   // transports.signal; see Signal.On
 	Telegram         Telegram // transports.telegram; see Telegram.On
 	OllamaURL        string   // e.g. http://192.168.1.50:11434
+	OllamaBackupURL  string   // tried when OllamaURL can't be reached, e.g. the same machine over a VPN; empty = none
 	DefaultModel     string   // empty = first model Ollama reports
 	VisionModel      string   // answers messages with photos when the chat's model can't see; empty = none
 	DefaultModelAuto bool     // no model was set: main picks the first installed one
@@ -126,22 +127,23 @@ func Load() (Config, error) {
 	}
 	s := settings{f}
 	c := Config{
-		ConfigFile:   f.path,
-		OllamaURL:    strings.TrimRight(s.get("OLLAMA_URL", "http://localhost:11434"), "/"),
-		DefaultModel: s.get("OLLAMA_MODEL", ""),
-		VisionModel:  s.get("OLLAMA_VISION_MODEL", ""),
-		DataDir:      s.get("DATA_DIR", "/data"),
-		SystemPrompt: s.get("SYSTEM_PROMPT", defaultSystemPrompt),
-		SummaryModel: s.get("SUMMARY_MODEL", ""),
-		Reaction:     s.get("REACTION", "👀"),
-		KnowledgeDir: s.get("KNOWLEDGE_DIR", "/config/knowledge"),
+		ConfigFile:      f.path,
+		OllamaURL:       strings.TrimRight(s.get("OLLAMA_URL", "http://localhost:11434"), "/"),
+		OllamaBackupURL: strings.TrimRight(s.get("OLLAMA_BACKUP_URL", ""), "/"),
+		DefaultModel:    s.get("OLLAMA_MODEL", ""),
+		VisionModel:     s.get("OLLAMA_VISION_MODEL", ""),
+		DataDir:         s.get("DATA_DIR", "/data"),
+		SystemPrompt:    s.get("SYSTEM_PROMPT", defaultSystemPrompt),
+		SummaryModel:    s.get("SUMMARY_MODEL", ""),
+		Reaction:        s.get("REACTION", "👀"),
+		KnowledgeDir:    s.get("KNOWLEDGE_DIR", "/config/knowledge"),
 	}
 	c.DefaultModelAuto = c.DefaultModel == ""
 	switch strings.ToLower(c.Reaction) {
 	case "off", "none", "false":
 		c.Reaction = ""
 	}
-	for _, key := range []string{"SIGNAL_URL", "TELEGRAM_URL", "OLLAMA_URL"} {
+	for _, key := range []string{"SIGNAL_URL", "TELEGRAM_URL", "OLLAMA_URL", "OLLAMA_BACKUP_URL"} {
 		if u, err := url.Parse(s.get(key, "http://x")); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return c, fmt.Errorf("%s must be a URL like http://host:port", s.name(key))
 		}
@@ -553,6 +555,9 @@ func (c Config) Describe() string {
 		line("TELEGRAM_ALLOWED_SENDERS", masked(c.Telegram.Allowed))
 	}
 	line("OLLAMA_URL", safeURL(c.OllamaURL))
+	if c.OllamaBackupURL != "" {
+		line("OLLAMA_BACKUP_URL", safeURL(c.OllamaBackupURL))
+	}
 	line("OLLAMA_MODEL", model)
 	vision := c.VisionModel
 	if vision == "" {

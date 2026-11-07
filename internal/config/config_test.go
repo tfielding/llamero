@@ -592,3 +592,15 @@ webhooks:
 		})
 	}
 }
+
+func TestOllamaBackupURL(t *testing.T) {
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\nollama:\n  url: http://192.168.1.50:11434\n  backup_url: http://10.6.0.2:11434/\n")
+	c, err := Load()
+	if err != nil || c.OllamaBackupURL != "http://10.6.0.2:11434" || !strings.Contains(c.Describe(), "OLLAMA_BACKUP_URL: http://10.6.0.2:11434") {
+		t.Fatalf("%v %q", err, c.OllamaBackupURL)
+	}
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\nollama:\n  backup_url: 10.6.0.2:11434\n")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ollama.backup_url in ") {
+		t.Errorf("bad url: %v", err)
+	}
+}

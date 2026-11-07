@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,5 +106,56 @@ func TestChatCancel(t *testing.T) {
 	case <-aborted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server never saw the request end")
+	}
+}
+
+func TestBackupServer(t *testing.T) {
+	var mainHits, backupHits int
+	version := func(hits *int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			*hits++
+			if r.URL.Path == "/api/tags" {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
+			w.Write([]byte(`{"version":"x"}`))
+		}))
+	}
+	backup := version(&backupHits)
+	defer backup.Close()
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close() // nothing listens at the main address
+
+	c := New(gone.URL, 5*time.Second, backup.URL)
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatalf("ping via backup: %v", err)
+	}
+	if backupHits != 1 || c.active != 1 {
+		t.Fatalf("backup hits %d, active %d", backupHits, c.active)
+	}
+	// The main server is skipped for a while, so the next request goes straight to the backup.
+	if o := c.order(); o[0] != 1 || o[1] != 0 {
+		t.Errorf("order: %v", o)
+	}
+	// An error from a server that was reached isn't retried elsewhere.
+	if _, err := c.Models(context.Background()); err == nil || !strings.Contains(err.Error(), "500") {
+		t.Errorf("models: %v", err)
+	}
+
+	// The main server is back, and is preferred again once its skip time is over.
+	main := version(&mainHits)
+	defer main.Close()
+	c.bases[0] = main.URL
+	c.mu.Lock()
+	c.down[0] = time.Now().Add(-time.Second)
+	c.mu.Unlock()
+	if err := c.Ping(context.Background()); err != nil || mainHits != 1 || c.active != 0 {
+		t.Errorf("back to main: %v, hits %d, active %d", err, mainHits, c.active)
+	}
+
+	// Neither reachable: the error says it couldn't connect.
+	both := New(gone.URL, 5*time.Second, gone.URL)
+	if err := both.Ping(context.Background()); err == nil || !cantConnect(err) {
+		t.Errorf("none reachable: %v", err)
 	}
 }

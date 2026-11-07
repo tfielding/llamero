@@ -5,10 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,12 +45,27 @@ type ToolCall struct {
 }
 
 type Client struct {
-	base string
-	http *http.Client
+	bases []string // the server, then backups (e.g. the same machine over a VPN)
+	http  *http.Client
+
+	mu     sync.Mutex
+	down   map[int]time.Time // servers that couldn't be reached, until when they're skipped
+	active int               // the server the last request reached
 }
 
-func New(baseURL string, timeout time.Duration) *Client {
-	return &Client{base: baseURL, http: &http.Client{Timeout: timeout}}
+const (
+	dialTimeout = 3 * time.Second // an address that doesn't answer (e.g. a LAN address while away) fails fast
+	skipFor     = time.Minute     // an unreachable server is tried after the others for this long
+)
+
+// New returns a client for the Ollama server at baseURL. Requests that can't connect to it go to
+// the backups in order, e.g. the same machine at another address.
+func New(baseURL string, timeout time.Duration, backups ...string) *Client {
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = dialer.DialContext
+	return &Client{bases: append([]string{baseURL}, backups...), http: &http.Client{Timeout: timeout, Transport: tr},
+		down: map[int]time.Time{}}
 }
 
 // Stats are the timings Ollama reports with each reply (durations are nanoseconds in JSON).
@@ -115,7 +134,7 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, think a
 
 // Ping checks that Ollama is reachable, failing fast (it doesn't wait for a model).
 func (c *Client) Ping(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(len(c.bases))*dialTimeout)
 	defer cancel()
 	var out struct {
 		Version string `json:"version"`
@@ -227,16 +246,71 @@ func (c *Client) Models(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// do sends a request to the first server that can be reached: servers that recently couldn't
+// be are tried last. Only failing to connect moves on to the next; an error after connecting
+// (which may mean the request was received) is returned.
 func (c *Client) do(ctx context.Context, method, path string, body []byte, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
+	var err error
+	for _, i := range c.order() {
+		var resp *http.Response
+		resp, err = c.send(ctx, c.bases[i], method, path, body)
+		if err != nil && cantConnect(err) && ctx.Err() == nil {
+			c.mu.Lock()
+			c.down[i] = time.Now().Add(skipFor)
+			c.mu.Unlock()
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		c.reached(i)
+		return decode(resp, path, out)
+	}
+	return err
+}
+
+func (c *Client) send(ctx context.Context, base, method, path string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
+	return c.http.Do(req)
+}
+
+// order is the servers to try: those not recently unreachable first, in configured order.
+func (c *Client) order() []int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var up, down []int
+	for i := range c.bases {
+		if time.Now().Before(c.down[i]) {
+			down = append(down, i)
+		} else {
+			up = append(up, i)
+		}
 	}
+	return append(up, down...)
+}
+
+// reached notes the server a request got to, logging when that changes.
+func (c *Client) reached(i int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.down, i)
+	if i != c.active {
+		slog.Info("ollama: switched server", "using", map[bool]string{true: "main", false: fmt.Sprintf("backup %d", i)}[i == 0])
+		c.active = i
+	}
+}
+
+// cantConnect reports whether err means the server couldn't be connected to at all.
+func cantConnect(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
+
+func decode(resp *http.Response, path string, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))

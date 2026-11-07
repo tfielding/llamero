@@ -37,6 +37,7 @@ type fileConfig struct {
 	} `yaml:"transports"` // the messaging apps the bot talks on
 	Ollama struct {
 		URL         string `yaml:"url"`
+		BackupURL   string `yaml:"backup_url"`
 		Model       string `yaml:"model"`
 		VisionModel string `yaml:"vision_model"`
 		Timeout     string `yaml:"timeout"`
@@ -106,6 +107,7 @@ var fileKeys = map[string]string{
 	"TELEGRAM_TOKEN":           "transports.telegram.token",
 	"TELEGRAM_ALLOWED_SENDERS": "transports.telegram.allowed_senders",
 	"OLLAMA_URL":               "ollama.url",
+	"OLLAMA_BACKUP_URL":        "ollama.backup_url",
 	"OLLAMA_MODEL":             "ollama.model",
 	"OLLAMA_VISION_MODEL":      "ollama.vision_model",
 	"OLLAMA_TIMEOUT":           "ollama.timeout",
@@ -188,6 +190,7 @@ func loadFile(path string) (file, error) {
 		"TELEGRAM_TOKEN":           fc.Transports.Telegram.Token,
 		"TELEGRAM_ALLOWED_SENDERS": strings.Join(fc.Transports.Telegram.AllowedSenders, ","),
 		"OLLAMA_URL":               fc.Ollama.URL,
+		"OLLAMA_BACKUP_URL":        fc.Ollama.BackupURL,
 		"OLLAMA_MODEL":             fc.Ollama.Model,
 		"OLLAMA_VISION_MODEL":      fc.Ollama.VisionModel,
 		"OLLAMA_TIMEOUT":           fc.Ollama.Timeout,

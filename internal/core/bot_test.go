@@ -897,3 +897,18 @@ func TestAllowlistID(t *testing.T) {
 		}
 	}
 }
+
+func TestUnreachable(t *testing.T) {
+	timeout := &net.OpError{Op: "dial", Net: "tcp", Err: &timeoutErr{}}
+	readTimeout := &net.OpError{Op: "read", Net: "tcp", Err: &timeoutErr{}}
+	if !unreachable(refused) || !unreachable(timeout) || unreachable(readTimeout) || unreachable(errors.New("other")) {
+		t.Error("wrong")
+	}
+}
+
+// timeoutErr is a net.Error that timed out, like a connection attempt to an address that doesn't answer.
+type timeoutErr struct{}
+
+func (*timeoutErr) Error() string   { return "i/o timeout" }
+func (*timeoutErr) Timeout() bool   { return true }
+func (*timeoutErr) Temporary() bool { return true }
