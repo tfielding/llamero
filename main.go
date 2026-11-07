@@ -28,6 +28,7 @@ import (
 	"github.com/tfielding/llamero/internal/schedule"
 	"github.com/tfielding/llamero/internal/store"
 	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/transport"
 	signaltransport "github.com/tfielding/llamero/internal/transport/signal"
 	"github.com/tfielding/llamero/internal/webhook"
 	"github.com/tfielding/llamero/internal/wol"
@@ -70,6 +71,13 @@ func run() error {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
 	sc := signaltransport.New(cfg.Signal.URL, cfg.Signal.Number)
+	// The core talks to every transport through the router. Signal's ids aren't prefixed; others
+	// will be (e.g. "telegram:12345").
+	router := transport.NewRouter()
+	if err := router.Add("", sc); err != nil {
+		return err
+	}
+	listeners := []listener{{name: "signal", prefix: "", listen: sc.Listen}}
 	var box *toolbox.Box
 	if len(cfg.MCPServers) > 0 {
 		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
@@ -123,7 +131,7 @@ func run() error {
 		}
 	}
 	know.Get() // log what's there at startup
-	b := core.New(sc, llm, st, core.Options{
+	b := core.New(router, llm, st, core.Options{
 		Tools:        tools,
 		Knowledge:    know,
 		Schedules:    schedules,
@@ -145,13 +153,50 @@ func run() error {
 
 	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.Signal.URL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed()), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
 	b.StartScheduler(ctx)
-	err = sc.Listen(ctx, b.Handle)
+	err = listen(ctx, router, listeners, b.Handle)
 	b.Wait()
 	if errors.Is(err, context.Canceled) {
 		slog.Info("shut down")
 		return nil
 	}
 	return err
+}
+
+// listener is a transport's receiving side: listen calls handle for each message until ctx ends.
+type listener struct {
+	name, prefix string
+	listen       func(ctx context.Context, handle func(context.Context, transport.Message)) error
+}
+
+// listen runs every transport's listener, each message going through the router to handle, and
+// returns once they have all stopped. One that stops early (other than at shutdown) ends them all.
+func listen(parent context.Context, router *transport.Router, ls []listener, handle func(context.Context, transport.Message)) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	errs := make(chan error, len(ls))
+	for _, l := range ls {
+		go func() {
+			err := l.listen(ctx, router.Inbound(l.prefix, handle))
+			if err != nil && ctx.Err() == nil {
+				slog.Error("transport stopped", "transport", l.name, "err", err)
+			}
+			cancel()
+			errs <- err
+		}()
+	}
+	var all []error
+	for range ls {
+		if err := <-errs; err != nil && !errors.Is(err, context.Canceled) {
+			all = append(all, err)
+		}
+	}
+	switch {
+	case len(all) > 0:
+		return errors.Join(all...)
+	case parent.Err() != nil:
+		return context.Canceled // shutting down
+	}
+	return errors.New("a transport stopped listening")
 }
 
 // learnedDir is where verdicts on hook messages are kept: in the data folder, when there are hooks.

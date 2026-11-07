@@ -521,7 +521,9 @@ The code has two sides:
   and the `Messenger` interface. Each app is a package under it; **`internal/transport/signal`**
   is Signal (signal-cli-rest-api, envelope filtering, Markdown to Signal formatting). A new
   messaging app is a new package there that turns its events into `transport.Message` and
-  implements `Messenger`.
+  implements `Messenger`. The `transport.Router` lets the core talk on several apps at once: each
+  app's people get its prefix (`telegram:12345`), except Signal's, so the same person on two apps
+  is two people with their own chats.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full set of checks CI runs, and
 [SECURITY.md](SECURITY.md) for reporting vulnerabilities. Changes are listed in
