@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-07
+
 ### Added
 - Telegram: talk to Llamero from Telegram as well as, or instead of, Signal (`transports.telegram`
   with a bot token from @BotFather and the user ids allowed). It uses Telegram's Bot API directly,
