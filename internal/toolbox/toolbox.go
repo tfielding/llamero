@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tfielding/signal-ollama/internal/app"
 )
 
 const (
@@ -116,7 +117,7 @@ func New(servers []Server, opt Options) *Box {
 	return &Box{
 		servers:  servers,
 		opt:      opt,
-		client:   mcp.NewClient(&mcp.Implementation{Name: "signal-ollama", Version: "1"}, nil),
+		client:   mcp.NewClient(&mcp.Implementation{Name: app.Name, Version: "1"}, nil),
 		sessions: map[string]*mcp.ClientSession{},
 		errs:     map[string]error{},
 		hidden:   map[string]bool{},

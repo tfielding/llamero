@@ -19,14 +19,14 @@ func TestMain(m *testing.M) {
 
 func TestLoad(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", " +15550000001 , +15550000002,")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", " +15550000001 , +15550000002,")
 	t.Setenv("OLLAMA_URL", "http://10.0.0.5:11434/")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Allowed) != 2 || !c.Allowed["+15550000002"] {
-		t.Fatalf("allowed: %v", c.Allowed)
+	if len(c.Signal.Allowed) != 2 || !c.Signal.Allowed["+15550000002"] {
+		t.Fatalf("allowed: %v", c.Signal.Allowed)
 	}
 	if c.OllamaURL != "http://10.0.0.5:11434" || c.HistoryLimit != 40 || !c.Summarize {
 		t.Fatalf("%+v", c)
@@ -38,15 +38,15 @@ func TestLoad(t *testing.T) {
 	}
 	t.Setenv("HISTORY_SUMMARY", "")
 
-	t.Setenv("ALLOWED_SENDERS", "")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "")
 	if _, err := Load(); err == nil {
-		t.Fatal("expected error without ALLOWED_SENDERS")
+		t.Fatal("expected error without SIGNAL_ALLOWED_SENDERS")
 	}
 }
 
 func TestDescribeHidesSecrets(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550001234,+15550005678")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550001234,+15550005678")
 	t.Setenv("OLLAMA_URL", "http://user:hunter2@10.0.0.5:11434")
 	t.Setenv("MCP_SERVERS", "cams=http://go2rtc:8090/mcp")
 	t.Setenv("MCP_TOKEN_CAMS", "s3cret-token")
@@ -62,7 +62,7 @@ func TestDescribeHidesSecrets(t *testing.T) {
 	}
 	for _, want := range []string{
 		"SIGNAL_NUMBER: …0009",
-		"ALLOWED_SENDERS: …1234, …5678",
+		"SIGNAL_ALLOWED_SENDERS: …1234, …5678",
 		"OLLAMA_URL: http://10.0.0.5:11434",
 		"MCP_SERVERS: cams=http://go2rtc:8090/mcp (token set)",
 		"SYSTEM_PROMPT: default",
@@ -76,7 +76,7 @@ func TestDescribeHidesSecrets(t *testing.T) {
 
 func TestWakeOnLAN(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestWakeOnLAN(t *testing.T) {
 
 func TestAllowWrite(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	t.Setenv("MCP_SERVERS", "tools=http://tools:9000/mcp")
 	for v, want := range map[string]toolbox.Write{"": toolbox.WriteOff, "false": toolbox.WriteOff, "true": toolbox.WriteOn, "ASK": toolbox.WriteAsk} {
 		t.Setenv("MCP_ALLOW_WRITE", v)
@@ -134,7 +134,7 @@ func TestAllowWrite(t *testing.T) {
 
 func TestReaction(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	for v, want := range map[string]string{"": "👀", "⏳": "⏳", "off": "", "NONE": ""} {
 		t.Setenv("REACTION", v)
 		if c, _ := Load(); c.Reaction != want {
@@ -159,7 +159,7 @@ func TestSafeURL(t *testing.T) {
 
 func TestKnowledgeSettings(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
@@ -193,9 +193,10 @@ func writeConfig(t *testing.T, yml string) string {
 }
 
 const fullConfig = `
-signal:
-  number: ${SIGNAL_NUMBER_SECRET}
-  allowed_senders: [+15550000001, "+15550000002"]
+transports:
+  signal:
+    number: ${SIGNAL_NUMBER_SECRET}
+    allowed_senders: [+15550000001, "+15550000002"]
 ollama:
   url: http://192.168.1.50:11434/
   model: llama3.2:latest
@@ -226,10 +227,10 @@ func TestConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ConfigFile != path || c.SignalNumber != "+15550000009" || len(c.Allowed) != 2 || !c.Allowed["+15550000002"] ||
+	if c.ConfigFile != path || c.Signal.Number != "+15550000009" || len(c.Signal.Allowed) != 2 || !c.Signal.Allowed["+15550000002"] ||
 		c.OllamaURL != "http://192.168.1.50:11434" || c.DefaultModel != "llama3.2:latest" || c.OllamaTimeout != 2*time.Minute ||
 		c.HistoryLimit != 20 || c.Summarize || c.Reaction != "" || c.KnowledgeMaxChars != 4000 ||
-		c.SignalURL != "http://signal-cli-rest-api:8080" { // not in the file: default
+		c.Signal.URL != "http://signal-cli-rest-api:8080" { // not in the file: default
 		t.Fatalf("%+v", c)
 	}
 	if len(c.MCPServers) != 2 {
@@ -270,18 +271,21 @@ func TestConfigFileErrors(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER_SECRET", "+15550000009")
 	t.Setenv("HA_TOKEN", "x")
 	for name, tc := range map[string]struct{ yml, want string }{
-		"unknown key":       {"signal:\n  number: \"+1\"\n  alowed_senders: [\"+2\"]\n", `line 3: unknown setting "alowed_senders"`},
-		"list for value":    {"signal:\n  number: [\"+1\"]\n", "line 2: found a list, want a single value"},
-		"value for section": {"signal: \"+1\"\n", "line 1: found a value, want a section with settings under it"},
-		"unset var":         {"signal:\n  number: ${NOPE_NOT_SET}\n", "not set in the environment: ${NOPE_NOT_SET} (line 2)"},
-		"bad value":         {"signal: {number: \"+1\", allowed_senders: \"+2\"}\nhistory: {limit: 1}\n", "history.limit in "},
-		"bad write": {"signal: {number: \"+1\", allowed_senders: \"+2\"}\nmcp:\n  servers:\n    ha: {url: \"http://ha/mcp\", allow_write: maybe}\n",
+		"unknown key":       {"transports:\n  signal:\n    number: \"+1\"\n    alowed_senders: [\"+2\"]\n", `line 4: unknown setting "alowed_senders"`},
+		"list for value":    {"transports:\n  signal:\n    number: [\"+1\"]\n", "line 3: found a list, want a single value"},
+		"value for section": {"transports:\n  signal: \"+1\"\n", "line 2: found a value, want a section with settings under it"},
+		"unset var":         {"transports:\n  signal:\n    number: ${NOPE_NOT_SET}\n", "not set in the environment: ${NOPE_NOT_SET} (line 3)"},
+		"bad value":         {"transports:\n  signal: {number: \"+1\", allowed_senders: \"+2\"}\nhistory: {limit: 1}\n", "history.limit in "},
+		"bad write": {"transports:\n  signal: {number: \"+1\", allowed_senders: \"+2\"}\nmcp:\n  servers:\n    ha: {url: \"http://ha/mcp\", allow_write: maybe}\n",
 			"mcp.servers.ha in "},
-		"bad url":     {"signal: {number: \"+1\", allowed_senders: \"+2\"}\nmcp:\n  servers:\n    ha: {url: ha.lan}\n", "url must be like http://host:port/mcp"},
-		"required":    {"ollama:\n  model: x\n", "signal.number in "},
-		"not yaml":    {"signal: [unclosed\n", "yaml"},
-		"var in flow": {"mcp:\n  servers:\n    ha: { url: http://ha/mcp, token: ${HA_TOKEN} }\n", `put ${VAR} in quotes`},
-		"bad url 2":   {"signal: {number: \"+1\", allowed_senders: \"+2\"}\nollama: {url: \"192.168.1.50:11434\"}\n", "ollama.url in "},
+		"bad url":      {"transports:\n  signal: {number: \"+1\", allowed_senders: \"+2\"}\nmcp:\n  servers:\n    ha: {url: ha.lan}\n", "url must be like http://host:port/mcp"},
+		"no transport": {"ollama:\n  model: x\n", "no messaging app is set up: add transports.signal"},
+		"no number":    {"transports:\n  signal: {allowed_senders: \"+2\"}\n", "transports.signal.number in "},
+		"no senders":   {"transports:\n  signal: {number: \"+1\"}\n", "transports.signal.allowed_senders in "},
+		"old layout":   {"signal: {number: \"+1\"}\n", `unknown setting "signal" (it goes under transports:)`},
+		"not yaml":     {"transports: [unclosed\n", "yaml"},
+		"var in flow":  {"mcp:\n  servers:\n    ha: { url: http://ha/mcp, token: ${HA_TOKEN} }\n", `put ${VAR} in quotes`},
+		"bad url 2":    {"transports:\n  signal: {number: \"+1\", allowed_senders: \"+2\"}\nollama: {url: \"192.168.1.50:11434\"}\n", "ollama.url in "},
 	} {
 		t.Run(name, func(t *testing.T) {
 			writeConfig(t, tc.yml)
@@ -300,8 +304,8 @@ func TestConfigFileErrors(t *testing.T) {
 func TestEmptyConfigFileUsesEnv(t *testing.T) {
 	writeConfig(t, "# nothing yet\n")
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
-	if c, err := Load(); err != nil || c.SignalNumber != "+15550000009" || c.HistoryLimit != 40 {
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
+	if c, err := Load(); err != nil || c.Signal.Number != "+15550000009" || c.HistoryLimit != 40 {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
@@ -313,20 +317,20 @@ func TestExampleConfigLoads(t *testing.T) {
 	os.WriteFile(filepath.Join(know, "frigate.md"), []byte("x"), 0o644)
 	t.Setenv("KNOWLEDGE_DIR", know)
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001,+15550000002")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001,+15550000002")
 	t.Setenv("HA_TOKEN", "x")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.MCPServers) != 3 || c.MCPServers[2].Name != "ha" || c.MCPServers[2].Write != toolbox.WriteAsk || len(c.Allowed) != 2 {
+	if len(c.MCPServers) != 3 || c.MCPServers[2].Name != "ha" || c.MCPServers[2].Write != toolbox.WriteAsk || len(c.Signal.Allowed) != 2 {
 		t.Fatalf("%+v", c.MCPServers)
 	}
 }
 
 func TestServerKnowledge(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	know := t.TempDir()
 	os.WriteFile(filepath.Join(know, "home-assistant.md"), []byte("ha notes"), 0o644)
 	os.Mkdir(filepath.Join(know, "dir.md"), 0o755)
@@ -365,7 +369,7 @@ func TestServerKnowledgeUnreadable(t *testing.T) {
 		t.Skip("root can read anything")
 	}
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	know := t.TempDir()
 	os.WriteFile(filepath.Join(know, "ha.md"), []byte("notes"), 0o000)
 	t.Setenv("KNOWLEDGE_DIR", know)
@@ -390,7 +394,7 @@ func TestServerKnowledgeUnreadable(t *testing.T) {
 
 func TestSchedulesSetting(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	c, err := Load()
 	if err != nil || !c.Schedules || !strings.Contains(c.Describe(), "SCHEDULES: true\n") {
 		t.Fatalf("default: %v %v", c.Schedules, err)
@@ -412,7 +416,7 @@ func TestSchedulesSetting(t *testing.T) {
 
 func TestHealthAddr(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	for in, want := range map[string]string{"": ":8092", ":9000": ":9000", "127.0.0.1:8092": "127.0.0.1:8092", "OFF": "", "none": ""} {
 		t.Setenv("HEALTH_ADDR", in)
 		c, err := Load()
@@ -439,7 +443,7 @@ func TestHealthAddr(t *testing.T) {
 
 func TestVisionModel(t *testing.T) {
 	t.Setenv("SIGNAL_NUMBER", "+15550000009")
-	t.Setenv("ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
 	if c, err := Load(); err != nil || c.VisionModel != "" || !strings.Contains(c.Describe(), "OLLAMA_VISION_MODEL: not set") {
 		t.Fatalf("default: %q %v", c.VisionModel, err)
 	}
@@ -454,7 +458,7 @@ func TestVisionModel(t *testing.T) {
 }
 
 func TestWebhookConfig(t *testing.T) {
-	base := "signal: {number: \"+15550000009\", allowed_senders: [\"+15550000001\", \"+15550000002\"]}\n" +
+	base := "transports:\n  signal: {number: \"+15550000009\", allowed_senders: [\"+15550000001\", \"+15550000002\"]}\n" +
 		"ollama: {wake_on_lan: {mac: \"aa:bb:cc:dd:ee:ff\"}}\n"
 	writeConfig(t, base+`webhooks:
   token: ${HOOK_SECRET}
@@ -514,7 +518,7 @@ func TestWebhookConfig(t *testing.T) {
 		"short token":   {"webhooks:\n  token: short\n  hooks:\n    door: {}\n", "must be at least 16 characters"},
 		"bad name":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
 		"only_if":       {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
-		"stranger":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in signal.allowed_senders"},
+		"stranger":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in transports.signal.allowed_senders"},
 		"bad wake":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
 		"bad cooldown":  {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {cooldown: 2d}\n", "cooldown must be a duration from 0 to 24h"},
 		"bad group":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
@@ -530,7 +534,7 @@ func TestWebhookConfig(t *testing.T) {
 			}
 		})
 	}
-	writeConfig(t, "signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\n"+
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\n"+
 		"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: true}\n")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "wake needs Wake-on-LAN") {
 		t.Errorf("wake without WoL: %v", err)

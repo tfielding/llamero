@@ -1,4 +1,5 @@
-// Command signal-ollama connects a Signal number (via signal-cli-rest-api) to an Ollama server.
+// Command signal-ollama is an assistant on Ollama that people talk to through messaging apps
+// (transports), with tools from MCP servers. Signal is the first transport.
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
 	"time"
 	_ "time/tzdata" // TZ works in the distroless image, which has no zoneinfo
 
+	"github.com/tfielding/signal-ollama/internal/app"
 	"github.com/tfielding/signal-ollama/internal/config"
 	"github.com/tfielding/signal-ollama/internal/core"
 	"github.com/tfielding/signal-ollama/internal/health"
@@ -38,11 +40,11 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "check the running bot's /healthz and exit 0 if it's healthy (for Docker)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: signal-ollama [-version] [-healthcheck]\n\nConfigured with environment variables and /config/config.yml; see the README.\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-version] [-healthcheck]\n\nConfigured with environment variables and /config/config.yml; see the README.\n", app.Name)
 	}
 	flag.Parse()
 	if *showVersion {
-		fmt.Println("signal-ollama", version)
+		fmt.Println(app.Name, version)
 		return
 	}
 	if *healthcheck {
@@ -67,7 +69,7 @@ func run() error {
 	if cfg.WakeMAC != nil {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
-	sc := signaltransport.New(cfg.SignalURL, cfg.SignalNumber)
+	sc := signaltransport.New(cfg.Signal.URL, cfg.Signal.Number)
 	var box *toolbox.Box
 	if len(cfg.MCPServers) > 0 {
 		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
@@ -127,7 +129,7 @@ func run() error {
 		Schedules:    schedules,
 		Hooks:        botHooks(cfg.Hooks),
 		LearnedDir:   learnedDir(cfg),
-		Allowed:      cfg.Allowed,
+		Allowed:      cfg.Allowed(),
 		DefaultModel: cfg.DefaultModel,
 		VisionModel:  cfg.VisionModel,
 		SystemPrompt: cfg.SystemPrompt,
@@ -141,7 +143,7 @@ func run() error {
 	})
 	ready.Store(b)
 
-	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.SignalURL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
+	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.Signal.URL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed()), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
 	b.StartScheduler(ctx)
 	err = sc.Listen(ctx, b.Handle)
 	b.Wait()

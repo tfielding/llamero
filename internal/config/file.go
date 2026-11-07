@@ -23,11 +23,13 @@ var defaultFile = DefaultFile
 // fileConfig is the layout of config.yml. Every setting can also be set by its environment
 // variable (see fileKeys), which wins over the file.
 type fileConfig struct {
-	Signal struct {
-		URL            string     `yaml:"url"`
-		Number         string     `yaml:"number"`
-		AllowedSenders stringList `yaml:"allowed_senders"`
-	} `yaml:"signal"`
+	Transports struct {
+		Signal struct {
+			URL            string     `yaml:"url"`
+			Number         string     `yaml:"number"`
+			AllowedSenders stringList `yaml:"allowed_senders"`
+		} `yaml:"signal"`
+	} `yaml:"transports"` // the messaging apps the bot talks on
 	Ollama struct {
 		URL         string `yaml:"url"`
 		Model       string `yaml:"model"`
@@ -92,30 +94,30 @@ type fileServer struct {
 
 // fileKeys maps each environment variable to its place in config.yml, for error messages.
 var fileKeys = map[string]string{
-	"SIGNAL_URL":           "signal.url",
-	"SIGNAL_NUMBER":        "signal.number",
-	"ALLOWED_SENDERS":      "signal.allowed_senders",
-	"OLLAMA_URL":           "ollama.url",
-	"OLLAMA_MODEL":         "ollama.model",
-	"OLLAMA_VISION_MODEL":  "ollama.vision_model",
-	"OLLAMA_TIMEOUT":       "ollama.timeout",
-	"OLLAMA_WOL_MAC":       "ollama.wake_on_lan.mac",
-	"OLLAMA_WOL_ADDR":      "ollama.wake_on_lan.addr",
-	"OLLAMA_WOL_WAIT":      "ollama.wake_on_lan.wait",
-	"HISTORY_LIMIT":        "history.limit",
-	"HISTORY_SUMMARY":      "history.summary",
-	"SUMMARY_MODEL":        "history.summary_model",
-	"SYSTEM_PROMPT":        "system_prompt",
-	"REACTION":             "reaction",
-	"DATA_DIR":             "data_dir",
-	"SCHEDULES":            "schedules.enabled",
-	"HEALTH_ADDR":          "health.addr",
-	"KNOWLEDGE_DIR":        "knowledge.dir",
-	"KNOWLEDGE_MAX_CHARS":  "knowledge.max_chars",
-	"MCP_ALLOW_WRITE":      "mcp.allow_write",
-	"MCP_TOOLS":            "mcp.tools",
-	"MCP_MAX_RESULT_CHARS": "mcp.max_result_chars",
-	"WEBHOOK_TOKEN":        "webhooks.token",
+	"SIGNAL_URL":             "transports.signal.url",
+	"SIGNAL_NUMBER":          "transports.signal.number",
+	"SIGNAL_ALLOWED_SENDERS": "transports.signal.allowed_senders",
+	"OLLAMA_URL":             "ollama.url",
+	"OLLAMA_MODEL":           "ollama.model",
+	"OLLAMA_VISION_MODEL":    "ollama.vision_model",
+	"OLLAMA_TIMEOUT":         "ollama.timeout",
+	"OLLAMA_WOL_MAC":         "ollama.wake_on_lan.mac",
+	"OLLAMA_WOL_ADDR":        "ollama.wake_on_lan.addr",
+	"OLLAMA_WOL_WAIT":        "ollama.wake_on_lan.wait",
+	"HISTORY_LIMIT":          "history.limit",
+	"HISTORY_SUMMARY":        "history.summary",
+	"SUMMARY_MODEL":          "history.summary_model",
+	"SYSTEM_PROMPT":          "system_prompt",
+	"REACTION":               "reaction",
+	"DATA_DIR":               "data_dir",
+	"SCHEDULES":              "schedules.enabled",
+	"HEALTH_ADDR":            "health.addr",
+	"KNOWLEDGE_DIR":          "knowledge.dir",
+	"KNOWLEDGE_MAX_CHARS":    "knowledge.max_chars",
+	"MCP_ALLOW_WRITE":        "mcp.allow_write",
+	"MCP_TOOLS":              "mcp.tools",
+	"MCP_MAX_RESULT_CHARS":   "mcp.max_result_chars",
+	"WEBHOOK_TOKEN":          "webhooks.token",
 }
 
 // file is a loaded config.yml: settings by environment variable name, and the MCP servers.
@@ -171,30 +173,30 @@ func loadFile(path string) (file, error) {
 		return file{}, fmt.Errorf("%s: %w", path, err)
 	}
 	f := file{path: path, servers: fc.MCP.Servers, hooks: fc.Webhooks.Hooks, values: map[string]string{
-		"SIGNAL_URL":           fc.Signal.URL,
-		"SIGNAL_NUMBER":        fc.Signal.Number,
-		"ALLOWED_SENDERS":      strings.Join(fc.Signal.AllowedSenders, ","),
-		"OLLAMA_URL":           fc.Ollama.URL,
-		"OLLAMA_MODEL":         fc.Ollama.Model,
-		"OLLAMA_VISION_MODEL":  fc.Ollama.VisionModel,
-		"OLLAMA_TIMEOUT":       fc.Ollama.Timeout,
-		"OLLAMA_WOL_MAC":       fc.Ollama.WakeOnLAN.MAC,
-		"OLLAMA_WOL_ADDR":      fc.Ollama.WakeOnLAN.Addr,
-		"OLLAMA_WOL_WAIT":      fc.Ollama.WakeOnLAN.Wait,
-		"HISTORY_LIMIT":        fc.History.Limit,
-		"HISTORY_SUMMARY":      fc.History.Summary,
-		"SUMMARY_MODEL":        fc.History.SummaryModel,
-		"SYSTEM_PROMPT":        fc.SystemPrompt,
-		"REACTION":             fc.Reaction,
-		"DATA_DIR":             fc.DataDir,
-		"SCHEDULES":            fc.Schedules.Enabled,
-		"HEALTH_ADDR":          fc.Health.Addr,
-		"KNOWLEDGE_DIR":        fc.Knowledge.Dir,
-		"KNOWLEDGE_MAX_CHARS":  fc.Knowledge.MaxChars,
-		"MCP_ALLOW_WRITE":      fc.MCP.AllowWrite,
-		"MCP_TOOLS":            strings.Join(fc.MCP.Tools, ","),
-		"MCP_MAX_RESULT_CHARS": fc.MCP.MaxResultChars,
-		"WEBHOOK_TOKEN":        fc.Webhooks.Token,
+		"SIGNAL_URL":             fc.Transports.Signal.URL,
+		"SIGNAL_NUMBER":          fc.Transports.Signal.Number,
+		"SIGNAL_ALLOWED_SENDERS": strings.Join(fc.Transports.Signal.AllowedSenders, ","),
+		"OLLAMA_URL":             fc.Ollama.URL,
+		"OLLAMA_MODEL":           fc.Ollama.Model,
+		"OLLAMA_VISION_MODEL":    fc.Ollama.VisionModel,
+		"OLLAMA_TIMEOUT":         fc.Ollama.Timeout,
+		"OLLAMA_WOL_MAC":         fc.Ollama.WakeOnLAN.MAC,
+		"OLLAMA_WOL_ADDR":        fc.Ollama.WakeOnLAN.Addr,
+		"OLLAMA_WOL_WAIT":        fc.Ollama.WakeOnLAN.Wait,
+		"HISTORY_LIMIT":          fc.History.Limit,
+		"HISTORY_SUMMARY":        fc.History.Summary,
+		"SUMMARY_MODEL":          fc.History.SummaryModel,
+		"SYSTEM_PROMPT":          fc.SystemPrompt,
+		"REACTION":               fc.Reaction,
+		"DATA_DIR":               fc.DataDir,
+		"SCHEDULES":              fc.Schedules.Enabled,
+		"HEALTH_ADDR":            fc.Health.Addr,
+		"KNOWLEDGE_DIR":          fc.Knowledge.Dir,
+		"KNOWLEDGE_MAX_CHARS":    fc.Knowledge.MaxChars,
+		"MCP_ALLOW_WRITE":        fc.MCP.AllowWrite,
+		"MCP_TOOLS":              strings.Join(fc.MCP.Tools, ","),
+		"MCP_MAX_RESULT_CHARS":   fc.MCP.MaxResultChars,
+		"WEBHOOK_TOKEN":          fc.Webhooks.Token,
 	}}
 	for k, v := range f.values {
 		if v = strings.TrimSpace(v); v == "" {
@@ -214,6 +216,8 @@ func readable(te *yaml.TypeError) error {
 	msgs := make([]string, len(te.Errors))
 	for i, e := range te.Errors {
 		switch {
+		case unknownField.MatchString(e) && unknownField.FindStringSubmatch(e)[2] == "signal":
+			msgs[i] = unknownField.ReplaceAllString(e, `$1: unknown setting "$2" (it goes under transports:)`)
 		case unknownField.MatchString(e):
 			msgs[i] = unknownField.ReplaceAllString(e, `$1: unknown setting "$2" (check the spelling and indentation)`)
 		case wrongType.MatchString(e):

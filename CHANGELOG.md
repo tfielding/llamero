@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows
 - Code reorganized into `internal/core` (the assistant) and `internal/transport` (messaging apps,
   with Signal in `internal/transport/signal`), so other messaging apps can be added later. No
   change in behavior or configuration.
+- **Config: `signal:` moved to `transports.signal:`**, and `ALLOWED_SENDERS` is now
+  `SIGNAL_ALLOWED_SENDERS`, since each messaging app will have its own allowlist. The old
+  top-level `signal:` stops startup with a message saying where it goes. Without any messaging app
+  set up, the error now says so. The default system prompt says "a messaging app" instead of
+  Signal.
 - Hook checks no longer include the chat history: every model call has less to read, and an
   event check doesn't need your conversation. The result still joins the conversation afterwards.
 

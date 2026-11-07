@@ -14,29 +14,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tfielding/signal-ollama/internal/app"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
 	"github.com/tfielding/signal-ollama/internal/wol"
 )
 
-const defaultSystemPrompt = "You are a helpful assistant chatting over Signal on a phone. " +
+const defaultSystemPrompt = "You are a helpful assistant chatting in a messaging app on a phone. " +
 	"Keep answers short and conversational unless asked for detail. " +
 	"Formatting: you may use **bold**, *italic*, `code` and simple bullet lists. " +
 	"Do not use headings, tables or horizontal rules."
 
 type Config struct {
-	ConfigFile       string          // config file that was read; empty = environment variables only
-	SignalURL        string          // base URL of signal-cli-rest-api, e.g. http://signal-cli-rest-api:8080
-	SignalNumber     string          // the account registered in the container
-	OllamaURL        string          // e.g. http://192.168.1.50:11434
-	DefaultModel     string          // empty = first model Ollama reports
-	VisionModel      string          // answers messages with photos when the chat's model can't see; empty = none
-	DefaultModelAuto bool            // no model was set: main picks the first installed one
-	Allowed          map[string]bool // phone numbers (or Signal UUIDs) allowed to talk to the bot
-	DataDir          string          // where chat history is stored
-	HistoryLimit     int             // max messages (user+assistant) kept per chat
-	Summarize        bool            // summarize messages past HistoryLimit instead of dropping them
-	SummaryModel     string          // model that writes summaries; empty = the chat's model
+	ConfigFile       string // config file that was read; empty = environment variables only
+	Signal           Signal // transports.signal: the Signal transport
+	OllamaURL        string // e.g. http://192.168.1.50:11434
+	DefaultModel     string // empty = first model Ollama reports
+	VisionModel      string // answers messages with photos when the chat's model can't see; empty = none
+	DefaultModelAuto bool   // no model was set: main picks the first installed one
+	DataDir          string // where chat history is stored
+	HistoryLimit     int    // max messages (user+assistant) kept per chat
+	Summarize        bool   // summarize messages past HistoryLimit instead of dropping them
+	SummaryModel     string // model that writes summaries; empty = the chat's model
 	SystemPrompt     string
 	OllamaTimeout    time.Duration
 	Reaction         string // emoji shown on a message while it's being answered; empty = off
@@ -58,6 +57,22 @@ type Config struct {
 
 	WebhookToken string // what POST /hooks/<name> callers must send as "Authorization: Bearer <token>"
 	Hooks        []Hook // webhooks.hooks in the file, by name
+}
+
+// Signal is the Signal transport: signal-cli-rest-api and who may use the bot through it.
+type Signal struct {
+	URL     string          // base URL of signal-cli-rest-api, e.g. http://signal-cli-rest-api:8080
+	Number  string          // the account registered in the container
+	Allowed map[string]bool // phone numbers (or Signal account ids) allowed to talk to the bot
+}
+
+// Allowed is everyone allowed to talk to the bot, across the transports.
+func (c Config) Allowed() map[string]bool {
+	all := map[string]bool{}
+	for id := range c.Signal.Allowed {
+		all[id] = true
+	}
+	return all
 }
 
 // Hook is one hook: what to do with events sent to POST /hooks/<Name>.
@@ -92,12 +107,9 @@ func Load() (Config, error) {
 	s := settings{f}
 	c := Config{
 		ConfigFile:   f.path,
-		SignalURL:    strings.TrimRight(s.get("SIGNAL_URL", "http://signal-cli-rest-api:8080"), "/"),
-		SignalNumber: s.get("SIGNAL_NUMBER", ""),
 		OllamaURL:    strings.TrimRight(s.get("OLLAMA_URL", "http://localhost:11434"), "/"),
 		DefaultModel: s.get("OLLAMA_MODEL", ""),
 		VisionModel:  s.get("OLLAMA_VISION_MODEL", ""),
-		Allowed:      map[string]bool{},
 		DataDir:      s.get("DATA_DIR", "/data"),
 		SystemPrompt: s.get("SYSTEM_PROMPT", defaultSystemPrompt),
 		SummaryModel: s.get("SUMMARY_MODEL", ""),
@@ -115,16 +127,8 @@ func Load() (Config, error) {
 		}
 	}
 
-	if c.SignalNumber == "" {
-		return c, fmt.Errorf("%s is required (the number registered in signal-cli-rest-api)", s.missing("SIGNAL_NUMBER"))
-	}
-	for _, v := range strings.Split(s.get("ALLOWED_SENDERS", ""), ",") {
-		if v = strings.TrimSpace(v); v != "" {
-			c.Allowed[v] = true
-		}
-	}
-	if len(c.Allowed) == 0 {
-		return c, fmt.Errorf("%s is required (phone numbers allowed to use the bot)", s.missing("ALLOWED_SENDERS"))
+	if c.Signal, err = s.signal(); err != nil {
+		return c, err
 	}
 
 	if c.HistoryLimit, err = strconv.Atoi(s.get("HISTORY_LIMIT", "40")); err != nil || c.HistoryLimit < 2 {
@@ -197,6 +201,26 @@ func Load() (Config, error) {
 	return c, nil
 }
 
+// signal returns the Signal transport's settings. It's the only transport so far, so it's required.
+func (s settings) signal() (Signal, error) {
+	sig := Signal{URL: strings.TrimRight(s.get("SIGNAL_URL", "http://signal-cli-rest-api:8080"), "/"), Number: s.get("SIGNAL_NUMBER", ""),
+		Allowed: map[string]bool{}}
+	for _, v := range strings.Split(s.get("SIGNAL_ALLOWED_SENDERS", ""), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			sig.Allowed[v] = true
+		}
+	}
+	switch {
+	case sig.Number == "" && len(sig.Allowed) == 0:
+		return sig, fmt.Errorf("no messaging app is set up: add transports.signal (number and allowed_senders) to %s, or set SIGNAL_NUMBER and SIGNAL_ALLOWED_SENDERS", s.fileName())
+	case sig.Number == "":
+		return sig, fmt.Errorf("%s is required (the number registered in signal-cli-rest-api)", s.missing("SIGNAL_NUMBER"))
+	case len(sig.Allowed) == 0:
+		return sig, fmt.Errorf("%s is required (phone numbers allowed to use the bot)", s.missing("SIGNAL_ALLOWED_SENDERS"))
+	}
+	return sig, nil
+}
+
 // hooks returns webhooks.hooks from the file, checked: valid names, a task for only_if, and
 // recipients who are allowed senders.
 func (s settings) hooks(c Config) ([]Hook, error) {
@@ -228,8 +252,8 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 			return nil, fmt.Errorf("%s: think must be on, off, low, medium or high", where)
 		}
 		for _, r := range fh.To {
-			if !c.Allowed[r] {
-				return nil, fmt.Errorf("%s: to: %s is not in signal.allowed_senders", where, mask(r))
+			if !c.Allowed()[r] {
+				return nil, fmt.Errorf("%s: to: %s is not in transports.signal.allowed_senders", where, mask(r))
 			}
 			h.To = append(h.To, r)
 		}
@@ -310,7 +334,7 @@ func (s settings) checkKnowledge(name string) error {
 	case filepath.Base(name) != name:
 		return fmt.Errorf("%q: want just a file name in %s, e.g. ha.md", name, dir)
 	}
-	runAs := fmt.Sprintf("signal-ollama runs as uid %d", os.Getuid())
+	runAs := fmt.Sprintf("%s runs as uid %d", app.Name, os.Getuid())
 	entries, err := os.ReadDir(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -358,6 +382,14 @@ func (c Config) KnowledgeRefs() map[string][]string {
 		refs[file] = append(refs[file], s.Name)
 	}
 	return refs
+}
+
+// fileName is the config file read, or where one would go.
+func (s settings) fileName() string {
+	if s.f.path != "" {
+		return s.f.path
+	}
+	return "config.yml"
 }
 
 // missing is how to refer to a required setting that wasn't given anywhere.
@@ -432,8 +464,8 @@ func (c Config) Describe() string {
 	if c.DefaultModelAuto {
 		model += " (first installed model)"
 	}
-	allowed := make([]string, 0, len(c.Allowed))
-	for s := range c.Allowed {
+	allowed := make([]string, 0, len(c.Signal.Allowed))
+	for s := range c.Signal.Allowed {
 		allowed = append(allowed, mask(s))
 	}
 	sort.Strings(allowed)
@@ -453,9 +485,9 @@ func (c Config) Describe() string {
 	} else {
 		line("CONFIG_FILE", c.ConfigFile)
 	}
-	line("SIGNAL_URL", safeURL(c.SignalURL))
-	line("SIGNAL_NUMBER", mask(c.SignalNumber))
-	line("ALLOWED_SENDERS", strings.Join(allowed, ", "))
+	line("SIGNAL_URL", safeURL(c.Signal.URL))
+	line("SIGNAL_NUMBER", mask(c.Signal.Number))
+	line("SIGNAL_ALLOWED_SENDERS", strings.Join(allowed, ", "))
 	line("OLLAMA_URL", safeURL(c.OllamaURL))
 	line("OLLAMA_MODEL", model)
 	vision := c.VisionModel

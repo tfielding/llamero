@@ -11,7 +11,7 @@ services:
       - TZ=America/New_York             # your time zone, for scheduled checks
       - SIGNAL_URL=http://signal-cli-rest-api:8080
       - SIGNAL_NUMBER=+1XXXXXXXXXX      # number already registered in signal-cli-rest-api
-      - ALLOWED_SENDERS=+1YYYYYYYYYY    # your phone; comma-separate to add more
+      - SIGNAL_ALLOWED_SENDERS=+1YYYYYYYYYY   # your phone; comma-separate to add more
       - OLLAMA_URL=http://192.168.1.XX:11434
       # - OLLAMA_MODEL=llama3.2:latest  # default: first installed model
       # - HISTORY_LIMIT=40

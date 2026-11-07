@@ -107,7 +107,7 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
     environment:                # values for the ${...} in config.yml, from your .env
       - TZ=America/New_York     # your time zone, for schedules and times
       - SIGNAL_NUMBER=${SIGNAL_NUMBER}
-      - ALLOWED_SENDERS=${ALLOWED_SENDERS}
+      - SIGNAL_ALLOWED_SENDERS=${SIGNAL_ALLOWED_SENDERS}
     volumes:
       - /opt/signal-ollama/config:/config:ro
       - /opt/signal-ollama/data:/data
@@ -135,7 +135,7 @@ setting that's wrong.
 Locally, without Docker:
 
 ```bash
-SIGNAL_URL=http://<signal-host>:8080 SIGNAL_NUMBER=+1... ALLOWED_SENDERS=+1... \
+SIGNAL_URL=http://<signal-host>:8080 SIGNAL_NUMBER=+1... SIGNAL_ALLOWED_SENDERS=+1... \
 OLLAMA_URL=http://localhost:11434 DATA_DIR=./data go run .
 ```
 
@@ -147,9 +147,10 @@ Settings come from an optional config file, environment variables, or both.
   [`config.example.yml`](config.example.yml) to start:
 
   ```yaml
-  signal:
-    number: ${SIGNAL_NUMBER}
-    allowed_senders: ${ALLOWED_SENDERS}
+  transports:
+    signal:
+      number: ${SIGNAL_NUMBER}
+      allowed_senders: ${SIGNAL_ALLOWED_SENDERS}
   ollama:
     url: http://192.168.1.50:11434
     model: llama3.2:latest
@@ -174,9 +175,9 @@ Settings come from an optional config file, environment variables, or both.
 
 | Variable | config.yml | Default | |
 |---|---|---|---|
-| `SIGNAL_NUMBER` | `signal.number` | required | The number registered in signal-cli-rest-api |
-| `ALLOWED_SENDERS` | `signal.allowed_senders` | required | Phone numbers (or Signal UUIDs) allowed to use the bot; comma-separated, or a list in the file |
-| `SIGNAL_URL` | `signal.url` | `http://signal-cli-rest-api:8080` | |
+| `SIGNAL_NUMBER` | `transports.signal.number` | required | The number registered in signal-cli-rest-api |
+| `SIGNAL_ALLOWED_SENDERS` | `transports.signal.allowed_senders` | required | Phone numbers (or Signal account ids) allowed to use the bot through Signal; comma-separated, or a list in the file |
+| `SIGNAL_URL` | `transports.signal.url` | `http://signal-cli-rest-api:8080` | |
 | `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
 | `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
 | `OLLAMA_VISION_MODEL` | `ollama.vision_model` | none | Answers messages with [photos](#photos) when the chat's model can't see, e.g. `gemma3:4b` |
@@ -342,7 +343,7 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   camera, a sensor). Without a task, the event is sent to you unchanged and the model isn't used.
 - **`only_if`:** report only when this is true; otherwise the bot stays silent. Without it, every
   event gets a message.
-- **`to`:** who gets the messages, from `signal.allowed_senders`; default everyone in it. The model
+- **`to`:** who gets the messages, from the transports' `allowed_senders`; default everyone in them. The model
   runs once, with the first one's model (unless `model` is set) but without their chat history;
   the result goes to all of them and joins each one's conversation, so "show me that" works
   afterwards.
@@ -479,7 +480,7 @@ Assistant:
 
 ## Safety
 
-- **Allowlist only.** Only `ALLOWED_SENDERS` get answers; group chats are ignored.
+- **Allowlist only.** Only the transports' `allowed_senders` get answers; group chats are ignored.
 - **Read-only tools by default.** Tools that can change things are hidden unless a server allows
   them, and with `ask` each call needs your approval. Scheduled checks and hooks only ever get
   read-only tools, and creating or deleting a schedule needs your approval.
