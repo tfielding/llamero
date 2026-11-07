@@ -885,3 +885,15 @@ func TestImageNotesStayOutOfReplies(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowlistID(t *testing.T) {
+	for in, want := range map[string]string{
+		"telegram:123456789": "telegram:123456789", // needed in full for allowed_senders
+		"+15550000001":       "…0001",
+		"uuid-1234-abcd":     "…abcd",
+	} {
+		if got := allowlistID(in); got != want {
+			t.Errorf("%s: got %q", in, got)
+		}
+	}
+}

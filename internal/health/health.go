@@ -17,8 +17,9 @@ import (
 type Checks struct {
 	Version string
 	Started time.Time
-	// Signal reports the receive websocket: connected, since when, and why it last dropped.
-	Signal func() (connected bool, since time.Time, lastErr error)
+	// Transports report each messaging app's connection, by name: connected, since when, and why
+	// it last dropped.
+	Transports map[string]func() (connected bool, since time.Time, lastErr error)
 	// Ollama checks Ollama is reachable. It's reported but doesn't make the bot unhealthy:
 	// with Wake-on-LAN a sleeping Ollama is normal.
 	Ollama func(ctx context.Context) error
@@ -28,15 +29,15 @@ type Checks struct {
 
 // Report is the /healthz body.
 type Report struct {
-	Status  string            `json:"status"` // "ok" or "unhealthy"
-	Version string            `json:"version"`
-	Uptime  string            `json:"uptime"`
-	Signal  SignalReport      `json:"signal"`
-	Ollama  OllamaReport      `json:"ollama"`
-	MCP     map[string]string `json:"mcp,omitempty"` // server -> "ok" or "unavailable (why)"
+	Status     string                     `json:"status"` // "ok" or "unhealthy"
+	Version    string                     `json:"version"`
+	Uptime     string                     `json:"uptime"`
+	Transports map[string]TransportReport `json:"transports"`
+	Ollama     OllamaReport               `json:"ollama"`
+	MCP        map[string]string          `json:"mcp,omitempty"` // server -> "ok" or "unavailable (why)"
 }
 
-type SignalReport struct {
+type TransportReport struct {
 	Connected bool      `json:"connected"`
 	Since     time.Time `json:"since,omitzero"`
 	Error     string    `json:"error,omitempty"`
@@ -47,20 +48,24 @@ type OllamaReport struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// Handler serves GET /healthz: 200 when the bot can receive messages (connected to
-// signal-cli-rest-api), 503 when it can't. Ollama and MCP servers are reported in the body only.
+// Handler serves GET /healthz: 200 when the bot can receive messages on every transport it uses
+// (Signal, Telegram), 503 when it can't. Ollama and MCP servers are reported in the body only.
 func Handler(c Checks) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		rep := Report{Status: "ok", Version: c.Version, Uptime: time.Since(c.Started).Round(time.Second).String()}
-		if c.Signal != nil {
-			ok, since, err := c.Signal()
-			rep.Signal = SignalReport{Connected: ok, Error: reason(err)}
+		healthy := len(c.Transports) > 0
+		rep.Transports = map[string]TransportReport{}
+		for name, status := range c.Transports {
+			ok, since, err := status()
+			t := TransportReport{Connected: ok, Error: reason(err)}
 			if ok {
-				rep.Signal.Since, rep.Signal.Error = since.UTC(), ""
-			} else if rep.Signal.Error == "" {
-				rep.Signal.Error = "not connected yet"
+				t.Since, t.Error = since.UTC(), ""
+			} else if t.Error == "" {
+				t.Error = "not connected yet"
 			}
+			rep.Transports[name] = t
+			healthy = healthy && ok
 		}
 		if c.Ollama != nil {
 			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
@@ -84,7 +89,7 @@ func Handler(c Checks) http.Handler {
 			}
 		}
 		code := http.StatusOK
-		if !rep.Signal.Connected {
+		if !healthy {
 			rep.Status, code = "unhealthy", http.StatusServiceUnavailable
 		}
 		w.Header().Set("Content-Type", "application/json")

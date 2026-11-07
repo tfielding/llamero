@@ -1,5 +1,5 @@
 // Command llamero is an assistant on Ollama that people talk to through messaging apps
-// (transports), with tools from MCP servers. Signal is the first transport.
+// (transports: Signal, Telegram), with tools from MCP servers.
 package main
 
 import (
@@ -30,6 +30,7 @@ import (
 	"github.com/tfielding/llamero/internal/toolbox"
 	"github.com/tfielding/llamero/internal/transport"
 	signaltransport "github.com/tfielding/llamero/internal/transport/signal"
+	"github.com/tfielding/llamero/internal/transport/telegram"
 	"github.com/tfielding/llamero/internal/webhook"
 	"github.com/tfielding/llamero/internal/wol"
 )
@@ -70,14 +71,23 @@ func run() error {
 	if cfg.WakeMAC != nil {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
-	sc := signaltransport.New(cfg.Signal.URL, cfg.Signal.Number)
-	// The core talks to every transport through the router. Signal's ids aren't prefixed; others
-	// will be (e.g. "telegram:12345").
+	// The core talks to every transport through the router. Signal's ids aren't prefixed; others'
+	// are (e.g. "telegram:12345").
 	router := transport.NewRouter()
-	if err := router.Add("", sc); err != nil {
-		return err
+	var listeners []listener
+	if cfg.Signal.On() {
+		sc := signaltransport.New(cfg.Signal.URL, cfg.Signal.Number)
+		listeners = append(listeners, listener{name: "signal", prefix: "", listen: sc.Listen, status: sc.Status, m: sc})
 	}
-	listeners := []listener{{name: "signal", prefix: "", listen: sc.Listen}}
+	if cfg.Telegram.On() {
+		tg := telegram.New(cfg.Telegram.URL, cfg.Telegram.Token)
+		listeners = append(listeners, listener{name: "telegram", prefix: telegram.Prefix, listen: tg.Listen, status: tg.Status, m: tg})
+	}
+	for _, l := range listeners {
+		if err := router.Add(l.prefix, l.m); err != nil {
+			return err
+		}
+	}
 	var box *toolbox.Box
 	if len(cfg.MCPServers) > 0 {
 		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
@@ -99,7 +109,7 @@ func run() error {
 		})
 	}
 	// Before waiting for Ollama below, so the bot reports itself as starting, not missing.
-	if err := serveHealth(ctx, cfg, sc, llm, box, hooks); err != nil {
+	if err := serveHealth(ctx, cfg, listeners, llm, box, hooks); err != nil {
 		return err
 	}
 
@@ -151,7 +161,7 @@ func run() error {
 	})
 	ready.Store(b)
 
-	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "signal", cfg.Signal.URL, "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed()), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
+	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "transports", len(listeners), "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed()), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
 	b.StartScheduler(ctx)
 	err = listen(ctx, router, listeners, b.Handle)
 	b.Wait()
@@ -162,10 +172,13 @@ func run() error {
 	return err
 }
 
-// listener is a transport's receiving side: listen calls handle for each message until ctx ends.
+// listener is a transport: listen calls handle for each message until ctx ends, status reports
+// its connection for /healthz, and m sends.
 type listener struct {
 	name, prefix string
 	listen       func(ctx context.Context, handle func(context.Context, transport.Message)) error
+	status       func() (connected bool, since time.Time, lastErr error)
+	m            transport.Messenger
 }
 
 // listen runs every transport's listener, each message going through the router to handle, and
@@ -256,11 +269,15 @@ func firstModel(ctx context.Context, llm interface {
 
 // serveHealth starts GET /healthz on cfg.HealthAddr (unless it's off) until ctx ends. A port
 // that can't be opened is an error at startup.
-func serveHealth(ctx context.Context, cfg config.Config, sc *signaltransport.Client, llm *ollama.Client, box *toolbox.Box, hooks http.Handler) error {
+func serveHealth(ctx context.Context, cfg config.Config, transports []listener, llm *ollama.Client, box *toolbox.Box, hooks http.Handler) error {
 	if cfg.HealthAddr == "" {
 		return nil
 	}
-	checks := health.Checks{Version: version, Started: time.Now(), Signal: sc.Status, Ollama: llm.Ping}
+	checks := health.Checks{Version: version, Started: time.Now(), Ollama: llm.Ping,
+		Transports: map[string]func() (bool, time.Time, error){}}
+	for _, t := range transports {
+		checks.Transports[t.name] = t.status
+	}
 	if box != nil {
 		checks.MCP = func() map[string]error {
 			errs := box.Errors()

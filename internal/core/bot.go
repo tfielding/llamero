@@ -119,7 +119,7 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 // ctx governs the whole bot: when it is cancelled, workers stop.
 func (b *Bot) Handle(ctx context.Context, in transport.Message) {
 	if !b.allowed(in) {
-		slog.Info("ignoring message from sender not on allowlist", "from", mask(in.Sender))
+		slog.Info("ignoring message from sender not on allowlist", "from", allowlistID(in.Sender))
 		return
 	}
 	sender, text, atts := in.Sender, strings.TrimSpace(in.Text), in.Files
@@ -304,6 +304,16 @@ func ext(mime string) string {
 		return ".gif"
 	}
 	return ""
+}
+
+// allowlistID is how a sender not on the allowlist is logged: in full if it has a transport
+// prefix (e.g. telegram:12345, which the user needs to copy into allowed_senders), masked if it's
+// a phone number.
+func allowlistID(id string) string {
+	if prefix, _, ok := strings.Cut(id, ":"); ok && prefix != "" && !strings.HasPrefix(id, "+") {
+		return id
+	}
+	return mask(id)
 }
 
 // mask hides all but the last 4 characters of a phone number in logs.

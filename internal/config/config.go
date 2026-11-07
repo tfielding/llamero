@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/tfielding/llamero/internal/app"
 	"github.com/tfielding/llamero/internal/knowledge"
 	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/transport/telegram"
 	"github.com/tfielding/llamero/internal/wol"
 )
 
@@ -26,16 +28,17 @@ const defaultSystemPrompt = "You are a helpful assistant chatting in a messaging
 	"Do not use headings, tables or horizontal rules."
 
 type Config struct {
-	ConfigFile       string // config file that was read; empty = environment variables only
-	Signal           Signal // transports.signal: the Signal transport
-	OllamaURL        string // e.g. http://192.168.1.50:11434
-	DefaultModel     string // empty = first model Ollama reports
-	VisionModel      string // answers messages with photos when the chat's model can't see; empty = none
-	DefaultModelAuto bool   // no model was set: main picks the first installed one
-	DataDir          string // where chat history is stored
-	HistoryLimit     int    // max messages (user+assistant) kept per chat
-	Summarize        bool   // summarize messages past HistoryLimit instead of dropping them
-	SummaryModel     string // model that writes summaries; empty = the chat's model
+	ConfigFile       string   // config file that was read; empty = environment variables only
+	Signal           Signal   // transports.signal; see Signal.On
+	Telegram         Telegram // transports.telegram; see Telegram.On
+	OllamaURL        string   // e.g. http://192.168.1.50:11434
+	DefaultModel     string   // empty = first model Ollama reports
+	VisionModel      string   // answers messages with photos when the chat's model can't see; empty = none
+	DefaultModelAuto bool     // no model was set: main picks the first installed one
+	DataDir          string   // where chat history is stored
+	HistoryLimit     int      // max messages (user+assistant) kept per chat
+	Summarize        bool     // summarize messages past HistoryLimit instead of dropping them
+	SummaryModel     string   // model that writes summaries; empty = the chat's model
 	SystemPrompt     string
 	OllamaTimeout    time.Duration
 	Reaction         string // emoji shown on a message while it's being answered; empty = off
@@ -66,11 +69,28 @@ type Signal struct {
 	Allowed map[string]bool // phone numbers (or Signal account ids) allowed to talk to the bot
 }
 
-// Allowed is everyone allowed to talk to the bot, across the transports.
+// On reports whether the Signal transport is set up.
+func (s Signal) On() bool { return s.Number != "" }
+
+// Telegram is the Telegram transport: a bot, and who may use it.
+type Telegram struct {
+	URL     string          // the Bot API, https://api.telegram.org unless self-hosted
+	Token   string          // from @BotFather
+	Allowed map[string]bool // Telegram user ids allowed to talk to the bot, without the prefix
+}
+
+// On reports whether the Telegram transport is set up.
+func (t Telegram) On() bool { return t.Token != "" }
+
+// Allowed is everyone allowed to talk to the bot, across the transports, as the core names them:
+// Signal's as they are, other transports' with their prefix (e.g. "telegram:12345").
 func (c Config) Allowed() map[string]bool {
 	all := map[string]bool{}
 	for id := range c.Signal.Allowed {
 		all[id] = true
+	}
+	for id := range c.Telegram.Allowed {
+		all[telegram.Prefix+":"+id] = true
 	}
 	return all
 }
@@ -121,7 +141,7 @@ func Load() (Config, error) {
 	case "off", "none", "false":
 		c.Reaction = ""
 	}
-	for _, key := range []string{"SIGNAL_URL", "OLLAMA_URL"} {
+	for _, key := range []string{"SIGNAL_URL", "TELEGRAM_URL", "OLLAMA_URL"} {
 		if u, err := url.Parse(s.get(key, "http://x")); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return c, fmt.Errorf("%s must be a URL like http://host:port", s.name(key))
 		}
@@ -129,6 +149,12 @@ func Load() (Config, error) {
 
 	if c.Signal, err = s.signal(); err != nil {
 		return c, err
+	}
+	if c.Telegram, err = s.telegram(); err != nil {
+		return c, err
+	}
+	if !c.Signal.On() && !c.Telegram.On() {
+		return c, fmt.Errorf("no messaging app is set up: add transports.signal (number and allowed_senders) or transports.telegram (token and allowed_senders) to %s", s.fileName())
 	}
 
 	if c.HistoryLimit, err = strconv.Atoi(s.get("HISTORY_LIMIT", "40")); err != nil || c.HistoryLimit < 2 {
@@ -201,7 +227,7 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// signal returns the Signal transport's settings. It's the only transport so far, so it's required.
+// signal returns the Signal transport's settings, if it's set up (a number or senders given).
 func (s settings) signal() (Signal, error) {
 	sig := Signal{URL: strings.TrimRight(s.get("SIGNAL_URL", "http://signal-cli-rest-api:8080"), "/"), Number: s.get("SIGNAL_NUMBER", ""),
 		Allowed: map[string]bool{}}
@@ -212,7 +238,7 @@ func (s settings) signal() (Signal, error) {
 	}
 	switch {
 	case sig.Number == "" && len(sig.Allowed) == 0:
-		return sig, fmt.Errorf("no messaging app is set up: add transports.signal (number and allowed_senders) to %s, or set SIGNAL_NUMBER and SIGNAL_ALLOWED_SENDERS", s.fileName())
+		return Signal{}, nil // not set up
 	case sig.Number == "":
 		return sig, fmt.Errorf("%s is required (the number registered in signal-cli-rest-api)", s.missing("SIGNAL_NUMBER"))
 	case len(sig.Allowed) == 0:
@@ -220,6 +246,34 @@ func (s settings) signal() (Signal, error) {
 	}
 	return sig, nil
 }
+
+// telegram returns the Telegram transport's settings, if it's set up (a token or senders given).
+func (s settings) telegram() (Telegram, error) {
+	tg := Telegram{URL: strings.TrimRight(s.get("TELEGRAM_URL", telegram.DefaultURL), "/"), Token: s.get("TELEGRAM_TOKEN", ""),
+		Allowed: map[string]bool{}}
+	for _, v := range strings.Split(s.get("TELEGRAM_ALLOWED_SENDERS", ""), ",") {
+		if v = strings.TrimPrefix(strings.TrimSpace(v), telegram.Prefix+":"); v == "" {
+			continue
+		}
+		if id, err := strconv.ParseInt(v, 10, 64); err != nil || id <= 0 {
+			return tg, fmt.Errorf("%s: %q is not a Telegram user id (a number; the bot logs it when someone not allowed messages it)", s.name("TELEGRAM_ALLOWED_SENDERS"), v)
+		}
+		tg.Allowed[v] = true
+	}
+	switch {
+	case tg.Token == "" && len(tg.Allowed) == 0:
+		return Telegram{}, nil // not set up
+	case tg.Token == "":
+		return tg, fmt.Errorf("%s is required (the bot token from @BotFather)", s.missing("TELEGRAM_TOKEN"))
+	case !telegramToken.MatchString(tg.Token):
+		return tg, fmt.Errorf("%s doesn't look like a bot token (123456:ABC-...)", s.name("TELEGRAM_TOKEN"))
+	case len(tg.Allowed) == 0:
+		return tg, fmt.Errorf("%s is required (Telegram user ids allowed to use the bot)", s.missing("TELEGRAM_ALLOWED_SENDERS"))
+	}
+	return tg, nil
+}
+
+var telegramToken = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
 
 // hooks returns webhooks.hooks from the file, checked: valid names, a task for only_if, and
 // recipients who are allowed senders.
@@ -253,7 +307,7 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 		}
 		for _, r := range fh.To {
 			if !c.Allowed()[r] {
-				return nil, fmt.Errorf("%s: to: %s is not in transports.signal.allowed_senders", where, mask(r))
+				return nil, fmt.Errorf("%s: to: %s is not allowed on any transport (allowed_senders; Telegram ids as telegram:<id>)", where, mask(r))
 			}
 			h.To = append(h.To, r)
 		}
@@ -464,11 +518,14 @@ func (c Config) Describe() string {
 	if c.DefaultModelAuto {
 		model += " (first installed model)"
 	}
-	allowed := make([]string, 0, len(c.Signal.Allowed))
-	for s := range c.Signal.Allowed {
-		allowed = append(allowed, mask(s))
+	masked := func(ids map[string]bool) string {
+		out := make([]string, 0, len(ids))
+		for id := range ids {
+			out = append(out, mask(id))
+		}
+		sort.Strings(out)
+		return strings.Join(out, ", ")
 	}
-	sort.Strings(allowed)
 	prompt := "default"
 	if c.SystemPrompt != defaultSystemPrompt {
 		prompt = fmt.Sprintf("custom (%d characters)", len(c.SystemPrompt))
@@ -485,9 +542,16 @@ func (c Config) Describe() string {
 	} else {
 		line("CONFIG_FILE", c.ConfigFile)
 	}
-	line("SIGNAL_URL", safeURL(c.Signal.URL))
-	line("SIGNAL_NUMBER", mask(c.Signal.Number))
-	line("SIGNAL_ALLOWED_SENDERS", strings.Join(allowed, ", "))
+	if c.Signal.On() {
+		line("SIGNAL_URL", safeURL(c.Signal.URL))
+		line("SIGNAL_NUMBER", mask(c.Signal.Number))
+		line("SIGNAL_ALLOWED_SENDERS", masked(c.Signal.Allowed))
+	}
+	if c.Telegram.On() {
+		line("TELEGRAM_URL", safeURL(c.Telegram.URL))
+		line("TELEGRAM_TOKEN", "set")
+		line("TELEGRAM_ALLOWED_SENDERS", masked(c.Telegram.Allowed))
+	}
 	line("OLLAMA_URL", safeURL(c.OllamaURL))
 	line("OLLAMA_MODEL", model)
 	vision := c.VisionModel

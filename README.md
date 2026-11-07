@@ -3,19 +3,23 @@
 [![ci](https://github.com/tfielding/llamero/actions/workflows/ci.yml/badge.svg)](https://github.com/tfielding/llamero/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Llamero (Spanish for a llama herder, pronounced yah-MEH-roh) is your own Ollama assistant on
-Signal: it answers when you message, uses tools from MCP servers, and keeps watch with checks and
-alerts, messaging you only when something matters.
+Llamero (Spanish for a llama herder, pronounced yah-MEH-roh) is your own Ollama assistant in the
+messaging apps you already use: it answers when you message, uses tools from MCP servers
+(cameras, Home Assistant, ...), and keeps watch with checks and alerts, messaging you only when
+something matters.
 
-A small Go service that sits next to
-[bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) and answers
-direct messages from an allowlist of phone numbers, optionally with tools from MCP servers
-(cameras, Home Assistant, ...).
+It's a small Go service. Each messaging app is a **transport**; use one or several at once:
+
+- **Signal**, through [bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api).
+  End-to-end encrypted. Needs a phone number for the bot.
+- **Telegram**, through Telegram's Bot API directly: no extra container, no phone number, no
+  public URL. Bot chats aren't end-to-end encrypted, so Telegram's servers can see them.
 
 ```
-Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ llamero ⇄ Ollama
-                 ws /v1/receive               ⇅     /api/chat
-                 POST /v2/send            MCP servers (optional)
+Signal app   ⇄ signal-cli-rest-api ⇄ ┐
+                                      ├ llamero ⇄ Ollama
+Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
+                                      MCP servers (optional)
 ```
 
 ## Features
@@ -23,8 +27,8 @@ Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ llamero ⇄ Ollama
 - Conversation memory per chat, saved to disk: recent messages word for word, plus a running
   summary of older ones (see [Long chats](#long-chats))
 - Typing indicator and a 👀 reaction on your message while it's being answered
-- Swipe-to-reply works: the model sees which message you replied to
-- Markdown from the model becomes Signal formatting (bold, italic, monospace); headings become bold
+- Replying to a message works: the model sees which message you replied to
+- Markdown from the model becomes the app's formatting (bold, italic, code); headings become bold
   lines, tables become label/value lines
 - [Send it photos](#photos) and ask about them; a vision model answers when the chat's model can't see
 - Tools from MCP servers; pictures they return are sent to you as attachments (see [Tools](#tools-mcp))
@@ -67,19 +71,56 @@ right away, even while a reply is being written.
 | Message | Behavior |
 |---|---|
 | Direct message from an allowed sender | Answered |
-| Messages in group chats | Ignored |
-| Direct message from anyone else | Ignored (logged) |
-| Messages the account sends itself (alerts, sync messages) | Ignored |
+| Messages in group chats (and Telegram channels) | Ignored |
+| Direct message from anyone else | Ignored (logged, with their id) |
+| Messages the bot's own account sends (alerts, sync messages), and other bots | Ignored |
 
-It only reads from the receive websocket and sends direct replies, so other services that use the
-same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
+Each transport has its own allowlist. The same person on two apps counts as two people, each with
+their own chat and memory.
 
 ## Requirements
 
-- signal-cli-rest-api with `MODE=json-rpc` and a registered number
 - Ollama reachable from the container. If Ollama runs on another machine, make it listen on the
   network: `OLLAMA_HOST=0.0.0.0` (macOS app: `launchctl setenv OLLAMA_HOST 0.0.0.0`, then restart
   Ollama).
+- At least one messaging app, set up as below.
+
+### Signal
+
+- signal-cli-rest-api with `MODE=json-rpc` and a registered number for the bot.
+- Llamero only reads from the receive websocket and sends direct replies, so other services that
+  use the same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
+- The typing indicator only shows if "Typing indicators" is on in your Signal app
+  (Settings → Privacy).
+
+```yaml
+transports:
+  signal:
+    url: http://signal-cli-rest-api:8080      # the default
+    number: ${SIGNAL_NUMBER}
+    allowed_senders: ${SIGNAL_ALLOWED_SENDERS}   # phone numbers
+```
+
+### Telegram
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather), send `/newbot` and pick a name. It
+   gives you a token like `123456789:AAH...`.
+2. Open your new bot and press **Start**: Telegram bots can only message people who have.
+3. Find your numeric user id: start Llamero with the token and any id, message the bot, and the log
+   says `ignoring message from sender not on allowlist from=telegram:123456789`; the number is
+   yours. (Or ask [@userinfobot](https://t.me/userinfobot).)
+
+```yaml
+transports:
+  telegram:
+    token: ${TELEGRAM_TOKEN}
+    allowed_senders: [123456789]               # Telegram user ids
+```
+
+- No public URL or open port: Llamero asks Telegram for new messages (long polling).
+- A bot token can only be used by one program at a time. If another program polls with it, or a
+  webhook is set for it, Llamero says so in the log.
+- Inside Llamero, Telegram people are `telegram:<id>`, e.g. in a hook's `to:`.
 
 ## Run
 
@@ -89,7 +130,7 @@ Like Frigate, llamero uses two folders: `config` for what you write (mounted rea
 ```
 /opt/llamero/
 ├── config/                 yours; the bot only reads it
-│   ├── config.yml          settings (optional, see Configuration)
+│   ├── config.yml          settings (see Configuration)
 │   └── knowledge/          notes for the model (optional, see Knowledge)
 └── data/                   chat history, one file per chat; owned by the bot
 ```
@@ -101,8 +142,9 @@ sudo mkdir -p /opt/llamero/config/knowledge /opt/llamero/data
 sudo chown 65532:65532 /opt/llamero/data
 ```
 
-Add the service next to your existing `signal-cli-rest-api` service, so they share a Docker network
-(see also [`docker-compose.example.yml`](docker-compose.example.yml)):
+Add the service to your compose file (see also
+[`docker-compose.example.yml`](docker-compose.example.yml)). With Signal, put it next to your
+`signal-cli-rest-api` service so they share a Docker network:
 
 ```yaml
   llamero:
@@ -112,6 +154,7 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
       - TZ=America/New_York     # your time zone, for schedules and times
       - SIGNAL_NUMBER=${SIGNAL_NUMBER}
       - SIGNAL_ALLOWED_SENDERS=${SIGNAL_ALLOWED_SENDERS}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
     volumes:
       - /opt/llamero/config:/config:ro
       - /opt/llamero/data:/data
@@ -120,7 +163,7 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
       interval: 60s
       timeout: 10s
       start_period: 30s
-    depends_on:
+    depends_on:                 # with Signal
       - signal-cli-rest-api
 ```
 
@@ -133,13 +176,11 @@ setting that's wrong.
 
 - Use `http://signal-cli-rest-api:8080` (the service name) for Signal, not `localhost`: inside a
   container, `localhost` is the container itself.
-- The typing indicator only shows if "Typing indicators" is on in your Signal app
-  (Settings → Privacy).
 
 Locally, without Docker:
 
 ```bash
-SIGNAL_URL=http://<signal-host>:8080 SIGNAL_NUMBER=+1... SIGNAL_ALLOWED_SENDERS=+1... \
+TELEGRAM_TOKEN=123456789:AAH... TELEGRAM_ALLOWED_SENDERS=123456789 \
 OLLAMA_URL=http://localhost:11434 DATA_DIR=./data go run .
 ```
 
@@ -155,6 +196,9 @@ Settings come from an optional config file, environment variables, or both.
     signal:
       number: ${SIGNAL_NUMBER}
       allowed_senders: ${SIGNAL_ALLOWED_SENDERS}
+    telegram:                     # either app, or both
+      token: ${TELEGRAM_TOKEN}
+      allowed_senders: [123456789]
   ollama:
     url: http://192.168.1.50:11434
     model: llama3.2:latest
@@ -179,9 +223,12 @@ Settings come from an optional config file, environment variables, or both.
 
 | Variable | config.yml | Default | |
 |---|---|---|---|
-| `SIGNAL_NUMBER` | `transports.signal.number` | required | The number registered in signal-cli-rest-api |
-| `SIGNAL_ALLOWED_SENDERS` | `transports.signal.allowed_senders` | required | Phone numbers (or Signal account ids) allowed to use the bot through Signal; comma-separated, or a list in the file |
+| `SIGNAL_NUMBER` | `transports.signal.number` | none | [Signal](#signal): the number registered in signal-cli-rest-api; sets up Signal |
+| `SIGNAL_ALLOWED_SENDERS` | `transports.signal.allowed_senders` | required with Signal | Phone numbers (or Signal account ids) allowed to use the bot through Signal; comma-separated, or a list in the file |
 | `SIGNAL_URL` | `transports.signal.url` | `http://signal-cli-rest-api:8080` | |
+| `TELEGRAM_TOKEN` | `transports.telegram.token` | none | [Telegram](#telegram): the bot token from @BotFather; sets up Telegram |
+| `TELEGRAM_ALLOWED_SENDERS` | `transports.telegram.allowed_senders` | required with Telegram | Telegram user ids allowed to use the bot; comma-separated, or a list in the file |
+| `TELEGRAM_URL` | `transports.telegram.url` | `https://api.telegram.org` | Only for a self-hosted Bot API server |
 | `OLLAMA_URL` | `ollama.url` | `http://localhost:11434` | |
 | `OLLAMA_MODEL` | `ollama.model` | first installed model | Default model; each chat can switch with `/models` |
 | `OLLAMA_VISION_MODEL` | `ollama.vision_model` | none | Answers messages with [photos](#photos) when the chat's model can't see, e.g. `gemma3:4b` |
@@ -347,7 +394,8 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   camera, a sensor). Without a task, the event is sent to you unchanged and the model isn't used.
 - **`only_if`:** report only when this is true; otherwise the bot stays silent. Without it, every
   event gets a message.
-- **`to`:** who gets the messages, from the transports' `allowed_senders`; default everyone in them. The model
+- **`to`:** who gets the messages, from the transports' `allowed_senders` (Telegram ones as
+  `telegram:<id>`); default everyone in them. The model
   runs once, with the first one's model (unless `model` is set) but without their chat history;
   the result goes to all of them and joins each one's conversation, so "show me that" works
   afterwards.
@@ -423,7 +471,8 @@ and the bot looks at it.
 - Photos are shrunk to at most 1600 pixels on the long side and sent as JPEG (from JPEG, PNG, WebP
   or GIF); up to 4 per message.
 - Other files (PDFs, videos, voice notes) aren't read; the bot says so, and answers any text with them.
-- signal-cli-rest-api keeps received files in its data folder; llamero doesn't delete them.
+- With Signal, signal-cli-rest-api keeps received files in its data folder; llamero doesn't delete
+  them.
 
 ## Long chats
 
@@ -461,19 +510,23 @@ Assistant:
   "status": "ok",
   "version": "0.1.0",
   "uptime": "26h4m10s",
-  "signal": { "connected": true, "since": "2026-11-04T09:00:00Z" },
+  "transports": {
+    "signal": { "connected": true, "since": "2026-11-04T09:00:00Z" },
+    "telegram": { "connected": true, "since": "2026-11-04T09:00:02Z" }
+  },
   "ollama": { "reachable": false, "error": "connection refused" },
   "mcp": { "frigate": "ok", "ha": "unavailable (timed out)" }
 }
 ```
 
-- **200** when the bot can receive messages (connected to signal-cli-rest-api), **503** when it
-  can't. That's the one to alert on.
+- **200** when the bot can receive messages on every transport it uses, **503** when one can't
+  (for example signal-cli-rest-api is down, or Telegram can't be reached). That's the one to alert on.
 - Ollama and MCP servers are reported but don't make it unhealthy: with Wake-on-LAN a sleeping
   Ollama is normal. To be alerted about Ollama too, have your monitor look for
   `"reachable": true` in the body.
 - The connection to signal-cli-rest-api is checked with a ping every 30 seconds, so one that died
-  quietly is noticed (and reconnected) within a minute.
+  quietly is noticed (and reconnected) within a minute. Telegram is polled continuously, so trouble
+  there shows up within a minute too.
 - **Docker:** the image has no curl, so `llamero -healthcheck` checks its own endpoint and
   exits 0 or 1; see the `healthcheck:` in [Run](#run). `docker ps` then shows the container as
   healthy or unhealthy.
@@ -493,12 +546,17 @@ Assistant:
   from you, and can't unlock actions.
 - **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
   removes credentials from URLs.
-- **Local only.** Chats, photos and knowledge notes only go to your Ollama server. Chat history is
-  stored unencrypted in `data`; photos aren't stored by llamero.
+- **Your models.** Chats, photos and knowledge notes only go to your Ollama server, never to a
+  cloud AI. Chat history is stored unencrypted in `data`; photos aren't stored by llamero.
+- **Pick the transport for your privacy needs.** Signal is end-to-end encrypted. Telegram bot chats
+  aren't: Telegram's servers can read the messages and pictures (including camera snapshots).
+- **Keep tokens secret.** Anyone with the Telegram bot token can read and send as the bot. Put it
+  in your `.env`, not in a file you share.
 - Runs as a non-root user in a minimal image with no shell.
 - signal-cli-rest-api has no authentication. Keep its port 8080 off the internet; ideally don't
   publish it at all and let containers talk over the Docker network.
-- In json-rpc mode, messages that arrive while llamero is down are not replayed.
+- Signal messages that arrive while llamero is down are not replayed (json-rpc mode). Telegram keeps
+  them for up to 24 hours and delivers them when llamero is back.
 
 ## Install without Docker
 
@@ -519,7 +577,8 @@ The code has two sides:
   commands). It knows nothing about any one messaging app.
 - **`internal/transport`**: what the core and the messaging apps share: an incoming message, files,
   and the `Messenger` interface. Each app is a package under it; **`internal/transport/signal`**
-  is Signal (signal-cli-rest-api, envelope filtering, Markdown to Signal formatting). A new
+  is Signal (signal-cli-rest-api, envelope filtering, Markdown to Signal formatting), and
+  **`internal/transport/telegram`** is Telegram (Bot API long polling, Markdown to HTML). A new
   messaging app is a new package there that turns its events into `transport.Message` and
   implements `Messenger`. The `transport.Router` lets the core talk on several apps at once: each
   app's people get its prefix (`telegram:12345`), except Signal's, so the same person on two apps
@@ -533,5 +592,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full set of checks CI runs, and
 
 MIT, see [LICENSE](LICENSE).
 
-llamero is an independent project, not affiliated with or endorsed by the Signal
-Technology Foundation or Ollama Inc. Signal and Ollama are trademarks of their respective owners.
+llamero is an independent project, not affiliated with or endorsed by the Signal Technology
+Foundation, Telegram or Ollama Inc. Signal, Telegram and Ollama are trademarks of their respective
+owners.

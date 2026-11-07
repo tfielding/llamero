@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Telegram: talk to Llamero from Telegram as well as, or instead of, Signal (`transports.telegram`
+  with a bot token from @BotFather and the user ids allowed). It uses Telegram's Bot API directly,
+  with no extra container or public URL, and supports formatting, photos both ways, the typing
+  indicator, the 👀 reaction and replies to earlier messages. Telegram people are
+  `telegram:<id>` inside Llamero (e.g. in a hook's `to:`), with their own chats.
+- Several messaging apps at once: each has its own allowlist, and `/healthz` reports each under
+  `transports`.
+
+### Changed
+- Signal is now optional: set up Signal, Telegram, or both.
+- `/healthz` reports `transports.signal` instead of `signal`, and is unhealthy if any transport
+  can't receive messages.
+- A sender who isn't allowed is logged with their full id when it isn't a phone number (e.g.
+  `telegram:123456789`), so it can be copied into `allowed_senders`.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added

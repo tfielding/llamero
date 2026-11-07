@@ -518,7 +518,7 @@ func TestWebhookConfig(t *testing.T) {
 		"short token":   {"webhooks:\n  token: short\n  hooks:\n    door: {}\n", "must be at least 16 characters"},
 		"bad name":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
 		"only_if":       {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
-		"stranger":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not in transports.signal.allowed_senders"},
+		"stranger":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not allowed on any transport"},
 		"bad wake":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
 		"bad cooldown":  {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {cooldown: 2d}\n", "cooldown must be a duration from 0 to 24h"},
 		"bad group":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
@@ -538,5 +538,57 @@ func TestWebhookConfig(t *testing.T) {
 		"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: true}\n")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "wake needs Wake-on-LAN") {
 		t.Errorf("wake without WoL: %v", err)
+	}
+}
+
+func TestTelegramConfig(t *testing.T) {
+	// Telegram alone is enough; its people are telegram:<id> to the core, and in hooks' to.
+	writeConfig(t, `transports:
+  telegram:
+    token: ${TG_TOKEN}
+    allowed_senders: [123456789, "telegram:42"]
+webhooks:
+  token: 0123456789abcdef0
+  hooks:
+    door: {task: check, to: ["telegram:123456789"]}
+`)
+	t.Setenv("TG_TOKEN", "4242:AAH-secret_part")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Signal.On() || !c.Telegram.On() || c.Telegram.URL != "https://api.telegram.org" || c.Telegram.Token != "4242:AAH-secret_part" {
+		t.Fatalf("%+v %+v", c.Signal, c.Telegram)
+	}
+	if a := c.Allowed(); len(a) != 2 || !a["telegram:123456789"] || !a["telegram:42"] {
+		t.Errorf("allowed: %v", a)
+	}
+	if c.Hooks[0].To[0] != "telegram:123456789" {
+		t.Errorf("hook to: %v", c.Hooks[0].To)
+	}
+	d := c.Describe()
+	if !strings.Contains(d, "TELEGRAM_TOKEN: set\n") || strings.Contains(d, "secret_part") || strings.Contains(d, "SIGNAL_") {
+		t.Errorf("settings:\n%s", d)
+	}
+
+	// Both at once.
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\n  telegram: {token: \"1:abc\", allowed_senders: 7}\n")
+	if c, err = Load(); err != nil || !c.Signal.On() || !c.Telegram.On() || len(c.Allowed()) != 2 {
+		t.Fatalf("%v %v", err, c.Allowed())
+	}
+
+	for name, tc := range map[string]struct{ yml, want string }{
+		"no token":   {"transports:\n  telegram: {allowed_senders: 7}\n", "transports.telegram.token in "},
+		"bad token":  {"transports:\n  telegram: {token: nope, allowed_senders: 7}\n", "doesn't look like a bot token"},
+		"no senders": {"transports:\n  telegram: {token: \"1:abc\"}\n", "transports.telegram.allowed_senders in "},
+		"username":   {"transports:\n  telegram: {token: \"1:abc\", allowed_senders: \"@someone\"}\n", `"@someone" is not a Telegram user id`},
+		"bad url":    {"transports:\n  telegram: {token: \"1:abc\", allowed_senders: 7, url: api.telegram.org}\n", "transports.telegram.url in "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, tc.yml)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

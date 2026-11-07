@@ -40,7 +40,7 @@ func (it Item) Spec(loc *time.Location) (Spec, error) {
 
 // File is one chat's schedules.
 type File struct {
-	Chat   string `json:"chat"` // who the results go to (the chat's Signal number)
+	Chat   string `json:"chat"` // who the results go to (the chat's id, e.g. a phone number or telegram:<id>)
 	NextID int    `json:"next_id"`
 	Items  []Item `json:"items"`
 }

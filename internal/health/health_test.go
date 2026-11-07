@@ -38,33 +38,40 @@ func TestHealthy(t *testing.T) {
 	since := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
 	code, rep, _ := get(t, Checks{
 		Version: "v1.2.3", Started: time.Now().Add(-90 * time.Minute),
-		Signal: func() (bool, time.Time, error) { return true, since, nil },
-		Ollama: func(context.Context) error { return nil },
-		MCP:    func() map[string]error { return map[string]error{"frigate": nil, "ha": nil} },
+		Transports: map[string]func() (bool, time.Time, error){"signal": func() (bool, time.Time, error) { return true, since, nil }},
+		Ollama:     func(context.Context) error { return nil },
+		MCP:        func() map[string]error { return map[string]error{"frigate": nil, "ha": nil} },
 	})
 	if code != 200 || rep.Status != "ok" || rep.Version != "v1.2.3" || rep.Uptime != "1h30m0s" ||
-		!rep.Signal.Connected || !rep.Signal.Since.Equal(since) || !rep.Ollama.Reachable ||
+		!rep.Transports["signal"].Connected || !rep.Transports["signal"].Since.Equal(since) || !rep.Ollama.Reachable ||
 		rep.MCP["frigate"] != "ok" || rep.MCP["ha"] != "ok" {
 		t.Fatalf("%d %+v", code, rep)
 	}
 }
 
-func TestSignalDownIsUnhealthy(t *testing.T) {
-	code, rep, _ := get(t, Checks{Signal: func() (bool, time.Time, error) { return false, time.Time{}, refused }})
-	if code != 503 || rep.Status != "unhealthy" || rep.Signal.Connected || rep.Signal.Error != "connection refused" {
+func TestTransportDownIsUnhealthy(t *testing.T) {
+	up := func() (bool, time.Time, error) { return true, time.Now(), nil }
+	down := func() (bool, time.Time, error) { return false, time.Time{}, refused }
+	code, rep, _ := get(t, Checks{Transports: map[string]func() (bool, time.Time, error){"signal": up, "telegram": down}})
+	if code != 503 || rep.Status != "unhealthy" || !rep.Transports["signal"].Connected || rep.Transports["telegram"].Connected ||
+		rep.Transports["telegram"].Error != "connection refused" {
 		t.Fatalf("%d %+v", code, rep)
 	}
 	// At startup, before the first connection attempt has finished.
-	code, rep, _ = get(t, Checks{Signal: func() (bool, time.Time, error) { return false, time.Time{}, nil }})
-	if code != 503 || rep.Signal.Error != "not connected yet" {
+	code, rep, _ = get(t, Checks{Transports: map[string]func() (bool, time.Time, error){"signal": func() (bool, time.Time, error) { return false, time.Time{}, nil }}})
+	if code != 503 || rep.Transports["signal"].Error != "not connected yet" {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	// No transports at all can't receive anything.
+	if code, _, _ = get(t, Checks{}); code != 503 {
 		t.Fatalf("%d %+v", code, rep)
 	}
 }
 
 func TestOllamaAndMCPDontMakeItUnhealthy(t *testing.T) {
 	code, rep, _ := get(t, Checks{
-		Signal: func() (bool, time.Time, error) { return true, time.Now(), nil },
-		Ollama: func(context.Context) error { return refused },
+		Transports: map[string]func() (bool, time.Time, error){"signal": func() (bool, time.Time, error) { return true, time.Now(), nil }},
+		Ollama:     func(context.Context) error { return refused },
 		MCP: func() map[string]error {
 			return map[string]error{"ha": fmt.Errorf("list tools: %w", context.DeadlineExceeded), "frigate": nil}
 		},
@@ -77,9 +84,9 @@ func TestOllamaAndMCPDontMakeItUnhealthy(t *testing.T) {
 
 func TestNoAddressesInTheReport(t *testing.T) {
 	_, _, body := get(t, Checks{
-		Signal: func() (bool, time.Time, error) {
+		Transports: map[string]func() (bool, time.Time, error){"signal": func() (bool, time.Time, error) {
 			return false, time.Time{}, &net.DNSError{Err: "no such host", Name: "signal-cli.home.example"}
-		},
+		}},
 		Ollama: func(context.Context) error { return refused },
 		MCP: func() map[string]error {
 			return map[string]error{"ha": errors.New(`Get "http://homeassistant:8123/api/mcp?token=abc": EOF from 10.0.0.7:8123`)}
