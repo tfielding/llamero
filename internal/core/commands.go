@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Slash commands (/status, /models, /stop, ...).
 

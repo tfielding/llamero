@@ -18,15 +18,15 @@ import (
 	"time"
 	_ "time/tzdata" // TZ works in the distroless image, which has no zoneinfo
 
-	"github.com/tfielding/signal-ollama/internal/bot"
 	"github.com/tfielding/signal-ollama/internal/config"
+	"github.com/tfielding/signal-ollama/internal/core"
 	"github.com/tfielding/signal-ollama/internal/health"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/schedule"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	signaltransport "github.com/tfielding/signal-ollama/internal/transport/signal"
 	"github.com/tfielding/signal-ollama/internal/webhook"
 	"github.com/tfielding/signal-ollama/internal/wol"
 )
@@ -67,14 +67,14 @@ func run() error {
 	if cfg.WakeMAC != nil {
 		wake = func(ctx context.Context) error { return wol.Send(ctx, cfg.WakeMAC, cfg.WakeAddr) }
 	}
-	sc := signalcli.New(cfg.SignalURL, cfg.SignalNumber)
+	sc := signaltransport.New(cfg.SignalURL, cfg.SignalNumber)
 	var box *toolbox.Box
 	if len(cfg.MCPServers) > 0 {
 		box = toolbox.New(cfg.MCPServers, toolbox.Options{Allowed: cfg.MCPTools, MaxResultChars: cfg.MCPMaxChars})
 		defer box.Close()
 	}
 	// Hooks are served from the start, and answer "starting up" until the bot is ready.
-	var ready atomic.Pointer[bot.Bot]
+	var ready atomic.Pointer[core.Bot]
 	var hooks http.Handler
 	if len(cfg.Hooks) > 0 {
 		hooks = webhook.Handler(cfg.WebhookToken, func(name, text, key string) error {
@@ -104,7 +104,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	var tools bot.Tools
+	var tools core.Tools
 	if box != nil {
 		names := []string{}
 		for _, t := range box.Tools(ctx) {
@@ -121,13 +121,12 @@ func run() error {
 		}
 	}
 	know.Get() // log what's there at startup
-	b := bot.New(sc, llm, st, bot.Options{
+	b := core.New(sc, llm, st, core.Options{
 		Tools:        tools,
 		Knowledge:    know,
 		Schedules:    schedules,
 		Hooks:        botHooks(cfg.Hooks),
 		LearnedDir:   learnedDir(cfg),
-		OwnNumber:    cfg.SignalNumber,
 		Allowed:      cfg.Allowed,
 		DefaultModel: cfg.DefaultModel,
 		VisionModel:  cfg.VisionModel,
@@ -162,13 +161,13 @@ func learnedDir(cfg config.Config) string {
 }
 
 // botHooks converts the configured hooks for the bot.
-func botHooks(hooks []config.Hook) map[string]bot.Hook {
+func botHooks(hooks []config.Hook) map[string]core.Hook {
 	if len(hooks) == 0 {
 		return nil
 	}
-	out := map[string]bot.Hook{}
+	out := map[string]core.Hook{}
 	for _, h := range hooks {
-		out[h.Name] = bot.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown,
+		out[h.Name] = core.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown,
 			Model: h.Model, Think: h.Think, Tools: h.Tools}
 	}
 	return out
@@ -210,7 +209,7 @@ func firstModel(ctx context.Context, llm interface {
 
 // serveHealth starts GET /healthz on cfg.HealthAddr (unless it's off) until ctx ends. A port
 // that can't be opened is an error at startup.
-func serveHealth(ctx context.Context, cfg config.Config, sc *signalcli.Client, llm *ollama.Client, box *toolbox.Box, hooks http.Handler) error {
+func serveHealth(ctx context.Context, cfg config.Config, sc *signaltransport.Client, llm *ollama.Client, box *toolbox.Box, hooks http.Handler) error {
 	if cfg.HealthAddr == "" {
 		return nil
 	}

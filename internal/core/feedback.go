@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Feedback on hooks: the user says a 🔔 message was a false alarm (or right, or that one was
 // missed), the model saves it with hook_feedback, and later checks of that hook get these

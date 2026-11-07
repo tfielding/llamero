@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Hooks: events sent to the bot by other systems (POST /hooks/<name>), checked by the model
 // against the hook's task, or passed on as they are.

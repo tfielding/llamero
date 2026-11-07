@@ -1,11 +1,12 @@
-// Package format converts Markdown from the model into Signal's styled text.
+// Markdown from the model, converted into Signal's styled text.
 //
 // signal-cli-rest-api (text_mode "styled") understands **bold**, *italic*,
 // ~strikethrough~, `monospace` and ||spoiler||, with \ as an escape. Everything
 // else Markdown uses (headings, tables, rules, links, code fences) is rewritten
 // into something that reads well on a phone, and stray marker characters are
 // escaped so they show up literally.
-package format
+
+package signal
 
 import (
 	"fmt"

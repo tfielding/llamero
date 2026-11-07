@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Answering a chat message: the model call and the tool-use loop.
 
@@ -15,9 +15,9 @@ import (
 
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 // maxToolRounds limits how many times the model can call tools before answering.
@@ -29,13 +29,13 @@ const maxToolFailures = 3
 // response is what gets sent back to the user.
 type response struct {
 	text      string
-	fromModel bool // Markdown from the model (converted to Signal formatting)
+	fromModel bool // Markdown from the model (the transport formats it for its app)
 	images    []toolbox.Image
 	summarize bool // history is past the limit: summarize after sending
 }
 
 // respond produces the reply for one message.
-func (b *Bot) respond(ctx context.Context, sender, text string, atts []signalcli.ReceivedAttachment) response {
+func (b *Bot) respond(ctx context.Context, sender, text string, atts []transport.File) response {
 	chat, err := b.store.Load(sender)
 	if err != nil {
 		slog.Error("load history", "err", err)
@@ -64,7 +64,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []signalcli
 		photos, note = b.loadPhotos(ctx, atts)
 		if len(photos) == 0 && text == "" {
 			for _, a := range atts {
-				if strings.HasPrefix(strings.ToLower(a.ContentType), "image/") {
+				if strings.HasPrefix(strings.ToLower(a.MIME), "image/") {
 					return response{text: "Sorry, I couldn't read that photo. Try sending it again."}
 				}
 			}

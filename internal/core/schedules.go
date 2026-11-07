@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Scheduled checks: the built-in tools the model uses to create them, the loop that runs them,
 // and /schedules.

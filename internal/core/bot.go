@@ -1,5 +1,6 @@
-// Package bot routes Signal messages to Ollama and handles chat commands.
-package bot
+// Package core is the assistant itself: it answers messages from a transport with Ollama, runs
+// tools, hooks and schedules, and handles chat commands. It knows nothing about any one messenger.
+package core
 
 import (
 	"context"
@@ -9,22 +10,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/format"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
 	"github.com/tfielding/signal-ollama/internal/schedule"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
-// Messenger is the Signal side (implemented by signalcli.Client).
-type Messenger interface {
-	Send(ctx context.Context, recipient, text string, styled bool, attachments []signalcli.Attachment) error
-	Typing(ctx context.Context, recipient string, on bool) error
-	React(ctx context.Context, recipient, targetAuthor string, ts int64, emoji string, remove bool) error
-	Attachment(ctx context.Context, id string) ([]byte, error)
-}
+// Messenger is the messaging app's side: a transport (see package transport).
+type Messenger = transport.Messenger
 
 // LLM is the model side (implemented by ollama.Client).
 type LLM interface {
@@ -50,7 +45,6 @@ type Options struct {
 	LearnedDir      string          // where verdicts on hook messages are saved (hook_feedback); empty = off
 	Location        *time.Location  // time zone for schedules; nil = time.Local
 	ScheduleTick    time.Duration   // how often to look for due schedules (default 15s)
-	OwnNumber       string
 	Allowed         map[string]bool
 	DefaultModel    string
 	VisionModel     string // answers messages with photos when the chat's model can't see; empty = none
@@ -64,7 +58,7 @@ type Options struct {
 	WakePoll        time.Duration               // how often to check while waiting
 	ApprovalTimeout time.Duration               // how long to wait for that answer
 	Reaction        string                      // emoji shown on a message while it's being answered; empty = off
-	TypingRefresh   time.Duration               // Signal clients hide the indicator after ~15s
+	TypingRefresh   time.Duration               // how often the typing indicator is renewed (Signal clients hide it after ~15s)
 }
 
 type Bot struct {
@@ -89,10 +83,10 @@ type Bot struct {
 // message is an incoming message waiting to be answered, or a scheduled check to run.
 type message struct {
 	text        string
-	attachments []signalcli.ReceivedAttachment // photos and files sent with it
-	ts          int64                          // Signal timestamp, which identifies the message for reactions
-	schedule    int                            // if set, run this schedule instead of answering text
-	hook        *hookRun                       // if set, handle these hook events instead
+	attachments []transport.File // photos and files sent with it
+	ts          int64            // identifies the message for reactions; 0 = unknown
+	schedule    int              // if set, run this schedule instead of answering text
+	hook        *hookRun         // if set, handle these hook events instead
 }
 
 type activity struct {
@@ -121,26 +115,26 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, lastHook: map[string]hookResult{}, cooldowns: map[string]time.Time{}}
 }
 
-// Handle is called for every incoming envelope. It never blocks on the model.
+// Handle is called for every message from the transport. It never blocks on the model.
 // ctx governs the whole bot: when it is cancelled, workers stop.
-func (b *Bot) Handle(ctx context.Context, env signalcli.Envelope) {
-	sender, text, ok := b.accept(env)
-	if !ok {
+func (b *Bot) Handle(ctx context.Context, in transport.Message) {
+	if !b.allowed(in) {
+		slog.Info("ignoring message from sender not on allowlist", "from", mask(in.Sender))
 		return
 	}
-	atts := env.DataMessage.Attachments
+	sender, text, atts := in.Sender, strings.TrimSpace(in.Text), in.Files
+	if text == "" && len(atts) == 0 {
+		return
+	}
 	// While a tool waits for approval, the next message is the answer. It's checked
 	// before the quote is added: a swipe-reply "yes" to the prompt is still a yes.
 	if len(atts) == 0 && b.answer(sender, text) {
 		return
 	}
 	if text != "" {
-		text = withQuote(text, env.DataMessage.Quote, b.opt.OwnNumber)
+		text = withQuote(text, in.Quote)
 	}
-	msg := message{text: text, attachments: atts, ts: env.DataMessage.Timestamp}
-	if msg.ts == 0 {
-		msg.ts = env.Timestamp
-	}
+	msg := message{text: text, attachments: atts, ts: in.ID}
 	// Read-only commands skip the queue so they answer even mid-reply.
 	if instant(msg.text) {
 		b.workers.Add(1)
@@ -178,38 +172,29 @@ func (b *Bot) enqueue(ctx context.Context, sender string, msg message) bool {
 // Wait blocks until all workers have exited (after ctx is cancelled).
 func (b *Bot) Wait() { b.workers.Wait() }
 
-// accept applies the boundaries: direct text messages from allowed senders only.
-// Messages in group chats, sync messages (our own
-// outgoing alerts), receipts and typing events are all ignored.
-func (b *Bot) accept(env signalcli.Envelope) (sender, text string, ok bool) {
-	dm := env.DataMessage
-	if dm == nil || dm.GroupInfo != nil {
-		return "", "", false
+// allowed reports whether the sender is on the allowlist, by any of their names. (The transport
+// has already dropped group chats, the bot's own messages, receipts and the like.)
+func (b *Bot) allowed(in transport.Message) bool {
+	if in.Sender == "" {
+		return false
 	}
-	text = strings.TrimSpace(dm.Message)
-	if text == "" && len(dm.Attachments) == 0 {
-		return "", "", false
+	if b.opt.Allowed[in.Sender] {
+		return true
 	}
-	sender = env.SourceNumber
-	if sender == "" {
-		sender = env.Source
+	for _, id := range in.AltIDs {
+		if id != "" && b.opt.Allowed[id] {
+			return true
+		}
 	}
-	if sender == "" || sender == b.opt.OwnNumber {
-		return "", "", false
-	}
-	if !b.opt.Allowed[sender] && !b.opt.Allowed[env.SourceUUID] {
-		slog.Info("ignoring message from sender not on allowlist", "from", mask(sender))
-		return "", "", false
-	}
-	return sender, text, true
+	return false
 }
 
 // maxQuoteChars caps how much of a quoted message is passed on.
 const maxQuoteChars = 1000
 
-// withQuote puts the message being replied to (Signal's swipe-to-reply) in front of text,
+// withQuote puts the message being replied to (e.g. Signal's swipe-to-reply) in front of text,
 // so "explain this part" refers to the right message. Commands are left alone.
-func withQuote(text string, q *signalcli.Quote, own string) string {
+func withQuote(text string, q *transport.Quote) string {
 	if q == nil || strings.HasPrefix(text, "/") {
 		return text
 	}
@@ -222,7 +207,7 @@ func withQuote(text string, q *signalcli.Quote, own string) string {
 	}
 	// Messages from the bot aren't always the model's: command replies like /models are too.
 	who := "their own earlier message"
-	if own != "" && (q.AuthorNumber == own || q.Author == own) {
+	if q.FromBot {
 		who = "this message the bot sent earlier, either your reply or the output of a command"
 	}
 	return "(The user is replying to " + who + ":\n> " + strings.ReplaceAll(quoted, "\n", "\n> ") + ")\n\n" + text
@@ -284,7 +269,7 @@ func (b *Bot) react(ctx context.Context, sender string, ts int64) (remove func()
 	if b.opt.Reaction == "" || ts == 0 {
 		return func() {}
 	}
-	if err := b.msg.React(ctx, sender, sender, ts, b.opt.Reaction, false); err != nil {
+	if err := b.msg.React(ctx, sender, ts, b.opt.Reaction, false); err != nil {
 		slog.Warn("reaction failed", "err", err)
 		return func() {}
 	}
@@ -292,27 +277,19 @@ func (b *Bot) react(ctx context.Context, sender string, ts int64) (remove func()
 		// The reply may have been stopped or the bot be shutting down: use a fresh context.
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := b.msg.React(rctx, sender, sender, ts, b.opt.Reaction, true); err != nil {
+		if err := b.msg.React(rctx, sender, ts, b.opt.Reaction, true); err != nil {
 			slog.Warn("removing reaction failed", "err", err)
 		}
 	}
 }
 
-// send delivers a reply. Model replies are Markdown, converted to Signal formatting;
-// if the styled send fails, the raw text is sent as a fallback.
+// send delivers a reply. Model replies are Markdown, which the transport formats for its app.
 func (b *Bot) send(ctx context.Context, to string, r response) error {
-	var att []signalcli.Attachment
+	var att []transport.Attachment
 	for i, img := range r.images {
-		att = append(att, signalcli.Attachment{MIME: img.MIME, Name: fmt.Sprintf("image-%d%s", i+1, ext(img.MIME)), Data: img.Data})
+		att = append(att, transport.Attachment{MIME: img.MIME, Name: fmt.Sprintf("image-%d%s", i+1, ext(img.MIME)), Data: img.Data})
 	}
-	if !r.fromModel {
-		return b.msg.Send(ctx, to, r.text, false, att)
-	}
-	if err := b.msg.Send(ctx, to, format.ToSignal(r.text), true, att); err != nil {
-		slog.Warn("styled send failed, retrying as plain text", "err", err)
-		return b.msg.Send(ctx, to, r.text, false, att)
-	}
-	return nil
+	return b.msg.Send(ctx, to, r.text, r.fromModel, att)
 }
 
 func ext(mime string) string {

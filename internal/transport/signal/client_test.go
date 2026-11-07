@@ -1,4 +1,4 @@
-package signalcli
+package signal
 
 import (
 	"context"
@@ -46,10 +46,10 @@ func TestReact(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, "+15550000009")
-	if err := c.React(context.Background(), "+15550000001", "+15550000001", 1730000000500, "👀", false); err != nil {
+	if err := c.React(context.Background(), "+15550000001", 1730000000500, "👀", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.React(context.Background(), "+15550000001", "+15550000001", 1730000000500, "👀", true); err != nil {
+	if err := c.React(context.Background(), "+15550000001", 1730000000500, "👀", true); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].method != "POST" || got[1].method != "DELETE" || got[0].path != "/v1/reactions/+15550000009" {
@@ -95,7 +95,7 @@ func TestStatusFollowsTheConnection(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Listen(ctx, func(context.Context, Envelope) {})
+	go c.listen(ctx, func(context.Context, Envelope) {})
 	waitFor(t, "connected", func() bool { ok, since, _ := c.Status(); return ok && !since.IsZero() })
 
 	// The server drops the connection: not connected, with the reason; then it reconnects.
@@ -123,7 +123,7 @@ func TestDeadConnectionIsNoticed(t *testing.T) {
 	c.pingEvery, c.pingTimeout = 20*time.Millisecond, 50*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Listen(ctx, func(context.Context, Envelope) {})
+	go c.listen(ctx, func(context.Context, Envelope) {})
 	waitFor(t, "connected", func() bool { ok, _, _ := c.Status(); return ok })
 	waitFor(t, "dead connection noticed", func() bool { ok, _, err := c.Status(); return !ok && err != nil })
 	// Backoff starts at 1s before reconnecting.

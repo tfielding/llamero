@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Photos sent to the bot: downloaded, shrunk and converted to JPEG for a vision model.
 
@@ -16,7 +16,7 @@ import (
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 
-	"github.com/tfielding/signal-ollama/internal/signalcli"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 const (
@@ -35,10 +35,10 @@ func noVisionText(model string) string {
 
 // loadPhotos downloads the photos among atts and returns them as JPEGs, plus a note for the model
 // about anything it couldn't use (other files, too many photos, unreadable pictures).
-func (b *Bot) loadPhotos(ctx context.Context, atts []signalcli.ReceivedAttachment) (photos [][]byte, note string) {
+func (b *Bot) loadPhotos(ctx context.Context, atts []transport.File) (photos [][]byte, note string) {
 	var skipped []string
 	for _, a := range atts {
-		if !strings.HasPrefix(strings.ToLower(a.ContentType), "image/") {
+		if !strings.HasPrefix(strings.ToLower(a.MIME), "image/") {
 			skipped = append(skipped, describeFile(a))
 			continue
 		}
@@ -48,14 +48,14 @@ func (b *Bot) loadPhotos(ctx context.Context, atts []signalcli.ReceivedAttachmen
 		}
 		data, err := b.msg.Attachment(ctx, a.ID)
 		if err != nil {
-			slog.Warn("downloading photo failed", "type", a.ContentType, "err", err)
+			slog.Warn("downloading photo failed", "type", a.MIME, "err", err)
 			skipped = append(skipped, "a photo that couldn't be downloaded")
 			continue
 		}
 		jpg, err := toJPEG(data)
 		if err != nil {
-			slog.Warn("reading photo failed", "type", a.ContentType, "err", err)
-			skipped = append(skipped, "a picture in a format that can't be read ("+a.ContentType+")")
+			slog.Warn("reading photo failed", "type", a.MIME, "err", err)
+			skipped = append(skipped, "a picture in a format that can't be read ("+a.MIME+")")
 			continue
 		}
 		photos = append(photos, jpg)
@@ -66,14 +66,14 @@ func (b *Bot) loadPhotos(ctx context.Context, atts []signalcli.ReceivedAttachmen
 	return photos, note
 }
 
-func describeFile(a signalcli.ReceivedAttachment) string {
-	switch t := strings.ToLower(a.ContentType); {
+func describeFile(a transport.File) string {
+	switch t := strings.ToLower(a.MIME); {
 	case strings.HasPrefix(t, "audio/"):
 		return "a voice note or audio file"
 	case strings.HasPrefix(t, "video/"):
 		return "a video"
-	case a.Filename != "":
-		return "a file (" + a.Filename + ")"
+	case a.Name != "":
+		return "a file (" + a.Name + ")"
 	}
 	return "a file"
 }

@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Asking the user before running a tool that can change things (MCP_ALLOW_WRITE=ask).
 

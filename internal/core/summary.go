@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Folding old messages into a running summary, so long chats keep their context.
 

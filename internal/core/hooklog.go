@@ -1,4 +1,4 @@
-package bot
+package core
 
 // /hooks: the latest hook checks and what each decided, for tuning a hook's rules. Kept in
 // memory only.

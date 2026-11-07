@@ -1,4 +1,4 @@
-package bot
+package core
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 type fakeTools struct {
@@ -205,7 +205,7 @@ func TestApprovalSwipeReply(t *testing.T) {
 	b.Handle(dm(me, "turn off the kitchen light"))
 	ask := reply(t, m)
 	env := dm(me, "Yes")
-	env.DataMessage.Quote = &signalcli.Quote{AuthorNumber: own, Text: ask}
+	env.Quote = &transport.Quote{FromBot: true, Text: ask}
 	b.Handle(env)
 	if r := reply(t, m); r != "echo: turned off" {
 		t.Fatalf("after swipe-reply yes: %q", r)

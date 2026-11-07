@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- Code reorganized into `internal/core` (the assistant) and `internal/transport` (messaging apps,
+  with Signal in `internal/transport/signal`), so other messaging apps can be added later. No
+  change in behavior or configuration.
 - Hook checks no longer include the chat history: every model call has less to read, and an
   event check doesn't need your conversation. The result still joins the conversation afterwards.
 

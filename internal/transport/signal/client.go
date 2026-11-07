@@ -1,5 +1,5 @@
-// Package signalcli talks to bbernhard/signal-cli-rest-api running in MODE=json-rpc.
-package signalcli
+// Package signal is the Signal transport. It talks to bbernhard/signal-cli-rest-api running in MODE=json-rpc.
+package signal
 
 import (
 	"bytes"
@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 // Envelope is the subset of signal-cli's receive payload we care about.
@@ -58,13 +60,6 @@ type GroupInfo struct {
 	GroupID string `json:"groupId"`
 }
 
-// Attachment is a file sent with a message.
-type Attachment struct {
-	MIME string
-	Name string
-	Data []byte
-}
-
 type Client struct {
 	base   string
 	number string
@@ -101,9 +96,18 @@ func (c *Client) setStatus(connected bool, err error) {
 	}
 }
 
-// Listen connects to the receive websocket and calls handle for every envelope.
-// It reconnects with backoff until ctx is cancelled.
-func (c *Client) Listen(ctx context.Context, handle func(context.Context, Envelope)) error {
+// Listen connects to the receive websocket and calls handle for every direct message from someone
+// else (see message). It reconnects with backoff until ctx is cancelled.
+func (c *Client) Listen(ctx context.Context, handle func(context.Context, transport.Message)) error {
+	return c.listen(ctx, func(ctx context.Context, env Envelope) {
+		if m, ok := c.message(env); ok {
+			handle(ctx, m)
+		}
+	})
+}
+
+// listen calls handle for every envelope.
+func (c *Client) listen(ctx context.Context, handle func(context.Context, Envelope)) error {
 	wsURL := strings.Replace(c.base, "http", "ws", 1) + "/v1/receive/" + url.PathEscape(c.number)
 	backoff := time.Second
 	for {
@@ -173,9 +177,22 @@ func (c *Client) listenOnce(ctx context.Context, wsURL string, handle func(conte
 	}
 }
 
-// Send sends a message to a single recipient. With styled set, the container
+// Send sends a message to a single recipient. With markdown set, text is converted to Signal's
+// formatting (ToSignal); if that send fails, the raw text is sent instead.
+func (c *Client) Send(ctx context.Context, recipient, text string, markdown bool, attachments []transport.Attachment) error {
+	if !markdown {
+		return c.send(ctx, recipient, text, false, attachments)
+	}
+	if err := c.send(ctx, recipient, ToSignal(text), true, attachments); err != nil {
+		slog.Warn("styled send failed, retrying as plain text", "err", err)
+		return c.send(ctx, recipient, text, false, attachments)
+	}
+	return nil
+}
+
+// send sends a message to a single recipient. With styled set, the container
 // turns **bold**, *italic*, ~strike~, `mono` and ||spoiler|| into Signal formatting.
-func (c *Client) Send(ctx context.Context, recipient, text string, styled bool, attachments []Attachment) error {
+func (c *Client) send(ctx context.Context, recipient, text string, styled bool, attachments []transport.Attachment) error {
 	mode := "normal"
 	if styled {
 		mode = "styled"
@@ -196,15 +213,15 @@ func (c *Client) Send(ctx context.Context, recipient, text string, styled bool, 
 	return c.do(ctx, http.MethodPost, "/v2/send", body)
 }
 
-// React adds emoji as a reaction to the message targetAuthor sent at ts, in the chat
-// with recipient, or removes it.
-func (c *Client) React(ctx context.Context, recipient, targetAuthor string, ts int64, emoji string, remove bool) error {
+// React adds emoji as a reaction to the message recipient sent at ts (Signal identifies messages
+// by their timestamp), or removes it.
+func (c *Client) React(ctx context.Context, recipient string, ts int64, emoji string, remove bool) error {
 	method := http.MethodPost
 	if remove {
 		method = http.MethodDelete
 	}
 	return c.do(ctx, method, "/v1/reactions/"+url.PathEscape(c.number), map[string]any{
-		"recipient": recipient, "reaction": emoji, "target_author": targetAuthor, "timestamp": ts,
+		"recipient": recipient, "reaction": emoji, "target_author": recipient, "timestamp": ts,
 	})
 }
 

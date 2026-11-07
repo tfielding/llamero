@@ -1,4 +1,4 @@
-package bot
+package core
 
 // Waking the Ollama machine with Wake-on-LAN when it's asleep.
 

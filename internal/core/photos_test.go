@@ -1,4 +1,4 @@
-package bot
+package core
 
 import (
 	"bytes"
@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 // picture encodes a w×h picture of one colour as PNG or JPEG.
@@ -33,15 +33,15 @@ func picture(t *testing.T, w, h int, format string) []byte {
 	return b.Bytes()
 }
 
-// photoMsg is a message with attachments, as signal-cli-rest-api delivers it.
-func photoMsg(text string, atts ...signalcli.ReceivedAttachment) signalcli.Envelope {
+// photoMsg is a message with attachments.
+func photoMsg(text string, atts ...transport.File) transport.Message {
 	env := dm(me, text)
-	env.DataMessage.Attachments = atts
+	env.Files = atts
 	return env
 }
 
-func jpg(id string) signalcli.ReceivedAttachment {
-	return signalcli.ReceivedAttachment{ID: id, ContentType: "image/jpeg"}
+func jpg(id string) transport.File {
+	return transport.File{ID: id, MIME: "image/jpeg"}
 }
 
 func TestPhotoGoesToTheVisionModel(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPhotoGoesToTheVisionModel(t *testing.T) {
 	l.caps = []string{"vision"}
 	b.opt.DefaultModel = "qwen2.5:7b" // can't see (no vision in its metadata)
 
-	b.Handle(photoMsg("what plant is this?", signalcli.ReceivedAttachment{ID: "p1", ContentType: "image/png"}))
+	b.Handle(photoMsg("what plant is this?", transport.File{ID: "p1", MIME: "image/png"}))
 	reply(t, m)
 	l.mu.Lock()
 	model, last := l.model, l.last[len(l.last)-1]
@@ -124,7 +124,7 @@ func TestFilesAndBadPhotos(t *testing.T) {
 	m.files = map[string][]byte{"p1": picture(t, 200, 100, "jpeg"), "bad": []byte("not a picture")}
 
 	// Only a voice note: told plainly, no model call.
-	b.Handle(photoMsg("", signalcli.ReceivedAttachment{ID: "v1", ContentType: "audio/aac"}))
+	b.Handle(photoMsg("", transport.File{ID: "v1", MIME: "audio/aac"}))
 	if got := reply(t, m); got != "I can only look at photos for now, not files, videos or voice notes." {
 		t.Fatalf("voice note: %q", got)
 	}
@@ -134,7 +134,7 @@ func TestFilesAndBadPhotos(t *testing.T) {
 		t.Fatalf("bad photo: %q", got)
 	}
 	// A photo plus a PDF: the photo is seen, the model is told about the file it can't open.
-	b.Handle(photoMsg("compare these", jpg("p1"), signalcli.ReceivedAttachment{ID: "d1", ContentType: "application/pdf", Filename: "invoice.pdf"}))
+	b.Handle(photoMsg("compare these", jpg("p1"), transport.File{ID: "d1", MIME: "application/pdf", Name: "invoice.pdf"}))
 	reply(t, m)
 	l.mu.Lock()
 	last := l.last[len(l.last)-1]
@@ -151,7 +151,7 @@ func TestTooManyPhotos(t *testing.T) {
 	b, m, l, _ := setup(t)
 	l.caps = []string{"vision"}
 	m.files = map[string][]byte{}
-	var atts []signalcli.ReceivedAttachment
+	var atts []transport.File
 	for _, id := range []string{"a", "b", "c", "d", "e"} {
 		m.files[id] = picture(t, 50, 50, "jpeg")
 		atts = append(atts, jpg(id))

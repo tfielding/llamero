@@ -1,4 +1,4 @@
-package bot
+package core
 
 import (
 	"context"
@@ -11,13 +11,12 @@ import (
 	"time"
 
 	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
+	"github.com/tfielding/signal-ollama/internal/transport"
 )
 
 const (
 	me    = "+15550000001" // allowed user
-	own   = "+15550000009" // the bot's number
 	other = "+15550000002" // someone not on the allowlist
 )
 
@@ -41,7 +40,7 @@ func (f *fakeMsg) Attachment(_ context.Context, id string) ([]byte, error) {
 	return nil, fmt.Errorf("attachment %s: 404 Not Found", id)
 }
 
-func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []signalcli.Attachment) error {
+func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []transport.Attachment) error {
 	f.mu.Lock()
 	for _, a := range att {
 		f.attached = append(f.attached, a.MIME+" "+a.Name)
@@ -52,7 +51,7 @@ func (f *fakeMsg) Send(_ context.Context, to, text string, styled bool, att []si
 	f.ch <- text
 	return nil
 }
-func (f *fakeMsg) React(_ context.Context, to, author string, ts int64, emoji string, remove bool) error {
+func (f *fakeMsg) React(_ context.Context, to string, ts int64, emoji string, remove bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	op := "+"
@@ -161,7 +160,7 @@ type testBot struct {
 	ctx context.Context
 }
 
-func (t testBot) Handle(env signalcli.Envelope) { t.Bot.Handle(t.ctx, env) }
+func (t testBot) Handle(in transport.Message) { t.Bot.Handle(t.ctx, in) }
 
 func setup(t *testing.T) (testBot, *fakeMsg, *fakeLLM, *store.Store) {
 	t.Helper()
@@ -173,15 +172,15 @@ func setup(t *testing.T) (testBot, *fakeMsg, *fakeLLM, *store.Store) {
 	m := &fakeMsg{ch: make(chan string, 10)}
 	l := &fakeLLM{}
 	b := New(m, l, st, Options{
-		OwnNumber: own, Allowed: map[string]bool{me: true}, DefaultModel: "llama3.2:latest",
+		Allowed: map[string]bool{me: true}, DefaultModel: "llama3.2:latest",
 		SystemPrompt: "sys", HistoryLimit: 4, TypingRefresh: 5 * time.Millisecond,
 	})
 	t.Cleanup(func() { cancel(); b.Wait() })
 	return testBot{b, ctx}, m, l, st
 }
 
-func dm(from, text string) signalcli.Envelope {
-	return signalcli.Envelope{SourceNumber: from, Source: from, DataMessage: &signalcli.DataMessage{Message: text}}
+func dm(from, text string) transport.Message {
+	return transport.Message{Sender: from, Text: text}
 }
 
 func reply(t *testing.T, m *fakeMsg) string {
@@ -207,13 +206,10 @@ func expectSilence(t *testing.T, m *fakeMsg) {
 func TestBoundaries(t *testing.T) {
 	b, m, _, _ := setup(t)
 
-	group := dm(me, "hi in a group chat")
-	group.DataMessage.GroupInfo = &signalcli.GroupInfo{GroupID: "abc"}
-	b.Handle(group)
+	// Group chats, the bot's own messages and receipts are the transport's to drop (see the
+	// signal package); the core keeps out senders who aren't allowed, and empty messages.
 	b.Handle(dm(other, "hi from someone else"))
-	b.Handle(dm(own, "outgoing alert"))
-	b.Handle(signalcli.Envelope{SourceNumber: own, SyncMessage: []byte(`{"sentMessage":{"message":"alert"}}`)})
-	b.Handle(signalcli.Envelope{SourceNumber: me}) // receipt / typing, no dataMessage
+	b.Handle(dm("", "no sender"))
 	b.Handle(dm(me, "   "))
 	expectSilence(t, m)
 
@@ -230,7 +226,7 @@ func TestAllowByUUID(t *testing.T) {
 	b, m, _, _ := setup(t)
 	b.opt.Allowed["uuid-123"] = true
 	env := dm(other, "hi")
-	env.SourceUUID = "uuid-123"
+	env.AltIDs = []string{"uuid-123"}
 	b.Handle(env)
 	if r := reply(t, m); r != "echo: hi" {
 		t.Fatalf("got %q", r)
@@ -712,14 +708,14 @@ func TestReplyContext(t *testing.T) {
 		defer l.mu.Unlock()
 		return l.last[len(l.last)-1].Content
 	}
-	send := func(text string, q *signalcli.Quote) string {
+	send := func(text string, q *transport.Quote) string {
 		env := dm(me, text)
-		env.DataMessage.Quote = q
+		env.Quote = q
 		b.Handle(env)
 		return reply(t, m)
 	}
 
-	send("explain the second part", &signalcli.Quote{AuthorNumber: own, Text: "First part.\nSecond part."})
+	send("explain the second part", &transport.Quote{FromBot: true, Text: "First part.\nSecond part."})
 	want := "(The user is replying to this message the bot sent earlier, either your reply or the output of a command:\n" +
 		"> First part.\n> Second part.)\n\nexplain the second part"
 	if got := lastUser(); got != want {
@@ -729,22 +725,22 @@ func TestReplyContext(t *testing.T) {
 		t.Fatalf("saved without quote: %q", c.History[0].Content)
 	}
 
-	send("and this?", &signalcli.Quote{Author: me, Text: "my question"})
+	send("and this?", &transport.Quote{Text: "my question"})
 	if got := lastUser(); !strings.HasPrefix(got, "(The user is replying to their own earlier message:\n> my question)") {
 		t.Fatalf("own quote: %q", got)
 	}
 
-	send("hi", &signalcli.Quote{AuthorNumber: own, Text: strings.Repeat("x", 1500)})
+	send("hi", &transport.Quote{FromBot: true, Text: strings.Repeat("x", 1500)})
 	if got := lastUser(); !strings.Contains(got, strings.Repeat("x", 1000)+"…)") || strings.Contains(got, strings.Repeat("x", 1001)) {
 		t.Fatal("long quote not cut at 1000 characters")
 	}
 
-	send("plain", &signalcli.Quote{AuthorNumber: own, Text: "  "}) // quote without text (e.g. an image)
+	send("plain", &transport.Quote{FromBot: true, Text: "  "}) // quote without text (e.g. an image)
 	if got := lastUser(); got != "plain" {
 		t.Fatalf("empty quote: %q", got)
 	}
 
-	if r := send("/stats", &signalcli.Quote{AuthorNumber: own, Text: "something"}); !strings.HasPrefix(r, "Last reply:") {
+	if r := send("/stats", &transport.Quote{FromBot: true, Text: "something"}); !strings.HasPrefix(r, "Last reply:") {
 		t.Fatalf("command with quote: %q", r)
 	}
 }
@@ -771,7 +767,7 @@ func TestReactions(t *testing.T) {
 	}
 	send := func(text string, ts int64) {
 		env := dm(me, text)
-		env.DataMessage.Timestamp = ts
+		env.ID = ts
 		b.Handle(env)
 		reply(t, m)
 	}

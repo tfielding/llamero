@@ -508,6 +508,16 @@ signal-ollama -version
 go test -race ./...
 ```
 
+The code has two sides:
+
+- **`internal/core`**: the assistant itself (the model loop, tools, hooks, schedules, knowledge,
+  commands). It knows nothing about any one messaging app.
+- **`internal/transport`**: what the core and the messaging apps share: an incoming message, files,
+  and the `Messenger` interface. Each app is a package under it; **`internal/transport/signal`**
+  is Signal (signal-cli-rest-api, envelope filtering, Markdown to Signal formatting). A new
+  messaging app is a new package there that turns its events into `transport.Message` and
+  implements `Messenger`.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full set of checks CI runs, and
 [SECURITY.md](SECURITY.md) for reporting vulnerabilities. Changes are listed in
 [CHANGELOG.md](CHANGELOG.md).

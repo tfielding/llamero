@@ -1,4 +1,4 @@
-package bot
+package core
 
 // The /think setting: per-chat control of model reasoning.
 

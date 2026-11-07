@@ -16,12 +16,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tfielding/signal-ollama/internal/bot"
+	"github.com/tfielding/signal-ollama/internal/core"
 	"github.com/tfielding/signal-ollama/internal/knowledge"
 	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/signalcli"
 	"github.com/tfielding/signal-ollama/internal/store"
 	"github.com/tfielding/signal-ollama/internal/toolbox"
+	signaltransport "github.com/tfielding/signal-ollama/internal/transport/signal"
 )
 
 var testJPEG = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'j', 'p', 'g', 0xFF, 0xD9}
@@ -148,9 +148,9 @@ func runToolScenario(t *testing.T, capabilities []string) (map[string]any, []cha
 	box := toolbox.New([]toolbox.Server{{Name: "cams", URL: cams.URL, Token: "tok"}}, toolbox.Options{})
 	defer box.Close()
 	st, _ := store.New(t.TempDir())
-	sc := signalcli.New(sigSrv.URL, botNum)
-	b := bot.New(sc, ollama.New(llmSrv.URL, 5*time.Second), st, bot.Options{
-		Tools: box, Knowledge: knowledge.New(know, map[string][]string{"cams.md": {"cams"}}, 1000), OwnNumber: botNum, Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
+	sc := signaltransport.New(sigSrv.URL, botNum)
+	b := core.New(sc, ollama.New(llmSrv.URL, 5*time.Second), st, core.Options{
+		Tools: box, Knowledge: knowledge.New(know, map[string][]string{"cams.md": {"cams"}}, 1000), Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
 	})
 	done := make(chan struct{})
 	go func() { sc.Listen(ctx, b.Handle); close(done) }()
@@ -277,9 +277,9 @@ func TestRepeatedToolFailuresStopEarly(t *testing.T) {
 	box := toolbox.New([]toolbox.Server{{Name: "cams", URL: cams.URL, Token: "tok"}}, toolbox.Options{})
 	defer box.Close()
 	st, _ := store.New(t.TempDir())
-	sc := signalcli.New(sigSrv.URL, botNum)
-	b := bot.New(sc, ollama.New(llm.URL, 5*time.Second), st, bot.Options{
-		Tools: box, OwnNumber: botNum, Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
+	sc := signaltransport.New(sigSrv.URL, botNum)
+	b := core.New(sc, ollama.New(llm.URL, 5*time.Second), st, core.Options{
+		Tools: box, Allowed: map[string]bool{me: true}, DefaultModel: "m", HistoryLimit: 10,
 	})
 	done := make(chan struct{})
 	go func() { sc.Listen(ctx, b.Handle); close(done) }()
