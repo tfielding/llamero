@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/store"
+	"github.com/tfielding/llamero/internal/store"
 )
 
 func instant(text string) bool {

@@ -1,4 +1,4 @@
-module github.com/tfielding/signal-ollama
+module github.com/tfielding/llamero
 
 go 1.25.0
 

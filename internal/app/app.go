@@ -2,4 +2,4 @@
 package app
 
 // Name is the program's name, as shown in usage, -version, logs and to MCP servers.
-const Name = "signal-ollama"
+const Name = "llamero"

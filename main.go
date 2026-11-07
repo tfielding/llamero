@@ -1,4 +1,4 @@
-// Command signal-ollama is an assistant on Ollama that people talk to through messaging apps
+// Command llamero is an assistant on Ollama that people talk to through messaging apps
 // (transports), with tools from MCP servers. Signal is the first transport.
 package main
 
@@ -19,18 +19,18 @@ import (
 	"time"
 	_ "time/tzdata" // TZ works in the distroless image, which has no zoneinfo
 
-	"github.com/tfielding/signal-ollama/internal/app"
-	"github.com/tfielding/signal-ollama/internal/config"
-	"github.com/tfielding/signal-ollama/internal/core"
-	"github.com/tfielding/signal-ollama/internal/health"
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/schedule"
-	"github.com/tfielding/signal-ollama/internal/store"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	signaltransport "github.com/tfielding/signal-ollama/internal/transport/signal"
-	"github.com/tfielding/signal-ollama/internal/webhook"
-	"github.com/tfielding/signal-ollama/internal/wol"
+	"github.com/tfielding/llamero/internal/app"
+	"github.com/tfielding/llamero/internal/config"
+	"github.com/tfielding/llamero/internal/core"
+	"github.com/tfielding/llamero/internal/health"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/schedule"
+	"github.com/tfielding/llamero/internal/store"
+	"github.com/tfielding/llamero/internal/toolbox"
+	signaltransport "github.com/tfielding/llamero/internal/transport/signal"
+	"github.com/tfielding/llamero/internal/webhook"
+	"github.com/tfielding/llamero/internal/wol"
 )
 
 // version is set at build time: -ldflags "-X main.version=v1.2.3".

@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/schedule"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/schedule"
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 const (

@@ -1,11 +1,11 @@
-# Add the signal-ollama service to the compose file that already runs
+# Add the llamero service to the compose file that already runs
 # signal-cli-rest-api (MODE=json-rpc), so they share a Docker network.
 services:
-  signal-ollama:
-    container_name: signal-ollama
-    build: ./signal-ollama          # path to this repo
+  llamero:
+    container_name: llamero
+    build: ./llamero          # path to this repo
     restart: always
-    # Settings can go here as environment variables, or in /opt/signal-ollama/config/config.yml
+    # Settings can go here as environment variables, or in /opt/llamero/config/config.yml
     # (see config.example.yml), or both; environment variables win.
     environment:
       - TZ=America/New_York             # your time zone, for scheduled checks
@@ -24,12 +24,12 @@ services:
       # - MCP_TOKEN_CAMS=...                                   # if that server has AUTH_TOKEN set
     volumes:
       # Like Frigate: config is what you write, data is what the bot writes.
-      #   sudo mkdir -p /opt/signal-ollama/config/knowledge /opt/signal-ollama/data
-      #   sudo chown 65532:65532 /opt/signal-ollama/data    # the image runs as uid 65532
-      - /opt/signal-ollama/config:/config:ro   # config.yml (optional) and knowledge/*.md (see README)
-      - /opt/signal-ollama/data:/data          # chat history
+      #   sudo mkdir -p /opt/llamero/config/knowledge /opt/llamero/data
+      #   sudo chown 65532:65532 /opt/llamero/data    # the image runs as uid 65532
+      - /opt/llamero/config:/config:ro   # config.yml (optional) and knowledge/*.md (see README)
+      - /opt/llamero/data:/data          # chat history
     healthcheck:                         # "healthy" in docker ps; see README, Health
-      test: ["CMD", "/signal-ollama", "-healthcheck"]
+      test: ["CMD", "/llamero", "-healthcheck"]
       interval: 60s
       timeout: 10s
       start_period: 30s

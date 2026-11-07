@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/app"
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	"github.com/tfielding/signal-ollama/internal/wol"
+	"github.com/tfielding/llamero/internal/app"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/wol"
 )
 
 const defaultSystemPrompt = "You are a helpful assistant chatting in a messaging app on a phone. " +

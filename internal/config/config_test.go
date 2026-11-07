@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 func TestMain(m *testing.M) {
 	// Don't pick up a real /config/config.yml on the machine running the tests.
-	defaultFile = filepath.Join(os.TempDir(), "signal-ollama-test-no-such-config.yml")
+	defaultFile = filepath.Join(os.TempDir(), "llamero-test-no-such-config.yml")
 	os.Exit(m.Run())
 }
 

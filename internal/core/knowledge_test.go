@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 func TestKnowledgeReachesTheModel(t *testing.T) {

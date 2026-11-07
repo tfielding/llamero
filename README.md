@@ -1,17 +1,21 @@
-# signal-ollama
+# Llamero
 
-[![ci](https://github.com/tfielding/signal-ollama/actions/workflows/ci.yml/badge.svg)](https://github.com/tfielding/signal-ollama/actions/workflows/ci.yml)
+[![ci](https://github.com/tfielding/llamero/actions/workflows/ci.yml/badge.svg)](https://github.com/tfielding/llamero/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Chat with your own Ollama models over Signal. A small Go service that sits next to
+Llamero (Spanish for a llama herder, pronounced yah-MEH-roh) is your own Ollama assistant on
+Signal: it answers when you message, uses tools from MCP servers, and keeps watch with checks and
+alerts, messaging you only when something matters.
+
+A small Go service that sits next to
 [bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) and answers
 direct messages from an allowlist of phone numbers, optionally with tools from MCP servers
 (cameras, Home Assistant, ...).
 
 ```
-Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ signal-ollama ⇄ Ollama
-                 ws /v1/receive                     ⇅     /api/chat
-                 POST /v2/send                  MCP servers (optional)
+Signal app ⇄ signal-cli-rest-api (json-rpc) ⇄ llamero ⇄ Ollama
+                 ws /v1/receive               ⇅     /api/chat
+                 POST /v2/send            MCP servers (optional)
 ```
 
 ## Features
@@ -79,11 +83,11 @@ same signal-cli-rest-api account to *send* (alerts etc.) are unaffected.
 
 ## Run
 
-Like Frigate, signal-ollama uses two folders: `config` for what you write (mounted read-only) and
+Like Frigate, llamero uses two folders: `config` for what you write (mounted read-only) and
 `data` for what the bot writes.
 
 ```
-/opt/signal-ollama/
+/opt/llamero/
 ├── config/                 yours; the bot only reads it
 │   ├── config.yml          settings (optional, see Configuration)
 │   └── knowledge/          notes for the model (optional, see Knowledge)
@@ -93,26 +97,26 @@ Like Frigate, signal-ollama uses two folders: `config` for what you write (mount
 The image runs as a non-root user (uid 65532) that needs to write to `data`:
 
 ```bash
-sudo mkdir -p /opt/signal-ollama/config/knowledge /opt/signal-ollama/data
-sudo chown 65532:65532 /opt/signal-ollama/data
+sudo mkdir -p /opt/llamero/config/knowledge /opt/llamero/data
+sudo chown 65532:65532 /opt/llamero/data
 ```
 
 Add the service next to your existing `signal-cli-rest-api` service, so they share a Docker network
 (see also [`docker-compose.example.yml`](docker-compose.example.yml)):
 
 ```yaml
-  signal-ollama:
-    image: ghcr.io/tfielding/signal-ollama:latest
+  llamero:
+    image: ghcr.io/tfielding/llamero:latest
     restart: always
     environment:                # values for the ${...} in config.yml, from your .env
       - TZ=America/New_York     # your time zone, for schedules and times
       - SIGNAL_NUMBER=${SIGNAL_NUMBER}
       - SIGNAL_ALLOWED_SENDERS=${SIGNAL_ALLOWED_SENDERS}
     volumes:
-      - /opt/signal-ollama/config:/config:ro
-      - /opt/signal-ollama/data:/data
+      - /opt/llamero/config:/config:ro
+      - /opt/llamero/data:/data
     healthcheck:                # optional: see Health
-      test: ["CMD", "/signal-ollama", "-healthcheck"]
+      test: ["CMD", "/llamero", "-healthcheck"]
       interval: 60s
       timeout: 10s
       start_period: 30s
@@ -121,10 +125,10 @@ Add the service next to your existing `signal-cli-rest-api` service, so they sha
 ```
 
 ```bash
-docker compose up -d signal-ollama
+docker compose up -d llamero
 ```
 
-Then send `/status` from your phone. If it doesn't start, `docker logs signal-ollama` names the
+Then send `/status` from your phone. If it doesn't start, `docker logs llamero` names the
 setting that's wrong.
 
 - Use `http://signal-cli-rest-api:8080` (the service name) for Signal, not `localhost`: inside a
@@ -170,7 +174,7 @@ Settings come from an optional config file, environment variables, or both.
 - **Environment variables** win over the file, setting by setting. `MCP_SERVERS` replaces the
   file's whole server list.
 - **Checked at startup:** a missing required setting, an invalid value, an unknown key (e.g. a
-  typo), an unset `${VAR}` or a missing knowledge file stops signal-ollama with a message naming
+  typo), an unset `${VAR}` or a missing knowledge file stops llamero with a message naming
   the setting and its line. The file is read once; restart to apply changes.
 
 | Variable | config.yml | Default | |
@@ -237,7 +241,7 @@ Example `home.md`:
 
 ## Tools (MCP)
 
-signal-ollama can use tools from any [MCP](https://modelcontextprotocol.io) server that speaks
+llamero can use tools from any [MCP](https://modelcontextprotocol.io) server that speaks
 Streamable HTTP, such as [frigate-mcp](https://github.com/tfielding/frigate-mcp),
 [go2rtc-mcp](https://github.com/tfielding/go2rtc-mcp) or Home Assistant's. It has no
 tool-specific code: list a server and its tools are offered to the model.
@@ -335,7 +339,7 @@ for the cooldown:
 
 ```bash
 curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"text": "Front door opened"}' http://signal-ollama:8092/hooks/front_door
+  -d '{"text": "Front door opened"}' http://llamero:8092/hooks/front_door
 ```
 
 - **`task`:** what the model does with the event, using read-only tools, like a
@@ -387,18 +391,18 @@ built in: a camera hook learns about false detections, a sensor hook about whate
 ```yaml
 # configuration.yaml
 rest_command:
-  signal_ollama_hook:
-    url: "http://<signal-ollama-host>:8092/hooks/{{ hook }}"
+  llamero_hook:
+    url: "http://<llamero-host>:8092/hooks/{{ hook }}"
     method: POST
     headers:
-      Authorization: !secret signal_ollama_hook_auth   # "Bearer <token>" in secrets.yaml
+      Authorization: !secret llamero_hook_auth   # "Bearer <token>" in secrets.yaml
     content_type: application/json
     payload: '{"text": {{ text | tojson }}, "key": {{ key | default("") | tojson }}}'
 ```
 
 ```yaml
 # an automation's action
-- action: rest_command.signal_ollama_hook
+- action: rest_command.llamero_hook
   data:
     hook: front_door
     text: "{{ trigger.to_state.name }} opened"
@@ -419,7 +423,7 @@ and the bot looks at it.
 - Photos are shrunk to at most 1600 pixels on the long side and sent as JPEG (from JPEG, PNG, WebP
   or GIF); up to 4 per message.
 - Other files (PDFs, videos, voice notes) aren't read; the bot says so, and answers any text with them.
-- signal-cli-rest-api keeps received files in its data folder; signal-ollama doesn't delete them.
+- signal-cli-rest-api keeps received files in its data folder; llamero doesn't delete them.
 
 ## Long chats
 
@@ -455,7 +459,7 @@ Assistant:
 ```json
 {
   "status": "ok",
-  "version": "1.3.0",
+  "version": "0.1.0",
   "uptime": "26h4m10s",
   "signal": { "connected": true, "since": "2026-11-04T09:00:00Z" },
   "ollama": { "reachable": false, "error": "connection refused" },
@@ -470,11 +474,11 @@ Assistant:
   `"reachable": true` in the body.
 - The connection to signal-cli-rest-api is checked with a ping every 30 seconds, so one that died
   quietly is noticed (and reconnected) within a minute.
-- **Docker:** the image has no curl, so `signal-ollama -healthcheck` checks its own endpoint and
+- **Docker:** the image has no curl, so `llamero -healthcheck` checks its own endpoint and
   exits 0 or 1; see the `healthcheck:` in [Run](#run). `docker ps` then shows the container as
   healthy or unhealthy.
 - **Uptime Kuma** on the same Docker network: an HTTP monitor on
-  `http://signal-ollama:8092/healthz`. No need to publish the port otherwise.
+  `http://llamero:8092/healthz`. No need to publish the port otherwise.
 - The report has no phone numbers, tokens, URLs or addresses; errors are cut to their cause
   ("connection refused", "timed out"), with the details in the bot's log.
 
@@ -490,17 +494,17 @@ Assistant:
 - **No secrets in replies.** `/settings` shows tokens only as "set", masks phone numbers and
   removes credentials from URLs.
 - **Local only.** Chats, photos and knowledge notes only go to your Ollama server. Chat history is
-  stored unencrypted in `data`; photos aren't stored by signal-ollama.
+  stored unencrypted in `data`; photos aren't stored by llamero.
 - Runs as a non-root user in a minimal image with no shell.
 - signal-cli-rest-api has no authentication. Keep its port 8080 off the internet; ideally don't
   publish it at all and let containers talk over the Docker network.
-- In json-rpc mode, messages that arrive while signal-ollama is down are not replayed.
+- In json-rpc mode, messages that arrive while llamero is down are not replayed.
 
 ## Install without Docker
 
 ```bash
-go install github.com/tfielding/signal-ollama@latest
-signal-ollama -version
+go install github.com/tfielding/llamero@latest
+llamero -version
 ```
 
 ## Develop
@@ -527,5 +531,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full set of checks CI runs, and
 
 MIT, see [LICENSE](LICENSE).
 
-signal-ollama is an independent project, not affiliated with or endorsed by the Signal
+llamero is an independent project, not affiliated with or endorsed by the Signal
 Technology Foundation or Ollama Inc. Signal and Ollama are trademarks of their respective owners.

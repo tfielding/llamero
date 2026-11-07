@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 func setupHooks(t *testing.T, hooks ...Hook) (testBot, *fakeMsg, *fakeLLM, *fakeTools) {

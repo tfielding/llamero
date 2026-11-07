@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 // picture encodes a w×h picture of one colour as PNG or JPEG.

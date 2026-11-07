@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/store"
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/store"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 const (

@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/schedule"
-	"github.com/tfielding/signal-ollama/internal/store"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/schedule"
+	"github.com/tfielding/llamero/internal/store"
+	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 // Messenger is the messaging app's side: a transport (see package transport).

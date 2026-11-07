@@ -11,10 +11,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/tfielding/signal-ollama/internal/core"
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/store"
-	signaltransport "github.com/tfielding/signal-ollama/internal/transport/signal"
+	"github.com/tfielding/llamero/internal/core"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/store"
+	signaltransport "github.com/tfielding/llamero/internal/transport/signal"
 )
 
 // TestEndToEnd runs the real clients against fake signal-cli-rest-api and Ollama servers.

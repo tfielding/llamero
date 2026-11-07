@@ -3,7 +3,7 @@ package signal
 import (
 	"strings"
 
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 // message turns an envelope into a message for the core, keeping only direct messages with

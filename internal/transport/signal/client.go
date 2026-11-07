@@ -17,7 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 // Envelope is the subset of signal-cli's receive payload we care about.

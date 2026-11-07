@@ -13,11 +13,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/store"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	"github.com/tfielding/signal-ollama/internal/transport"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/store"
+	"github.com/tfielding/llamero/internal/toolbox"
+	"github.com/tfielding/llamero/internal/transport"
 )
 
 // maxToolRounds limits how many times the model can call tools before answering.

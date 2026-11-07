@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/toolbox"
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 // needsApproval reports whether calling name must be approved first: its server asks for

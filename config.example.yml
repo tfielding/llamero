@@ -1,9 +1,9 @@
-# signal-ollama configuration: copy to /opt/signal-ollama/config/config.yml (mounted at /config).
+# llamero configuration: copy to /opt/llamero/config/config.yml (mounted at /config).
 # Everything is optional except a messaging app (transports: signal, with its number and
 # allowed_senders). Every setting can also be given as an environment variable (see README),
 # which wins over this file.
 # ${VAR} is filled in from the environment, so secrets can stay in your .env file.
-# Invalid settings or unknown keys stop signal-ollama at startup with a message saying which.
+# Invalid settings or unknown keys stop llamero at startup with a message saying which.
 
 transports:                             # the messaging apps the bot talks on
   signal:

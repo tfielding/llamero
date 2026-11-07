@@ -16,12 +16,12 @@ import (
 	"github.com/coder/websocket"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tfielding/signal-ollama/internal/core"
-	"github.com/tfielding/signal-ollama/internal/knowledge"
-	"github.com/tfielding/signal-ollama/internal/ollama"
-	"github.com/tfielding/signal-ollama/internal/store"
-	"github.com/tfielding/signal-ollama/internal/toolbox"
-	signaltransport "github.com/tfielding/signal-ollama/internal/transport/signal"
+	"github.com/tfielding/llamero/internal/core"
+	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/ollama"
+	"github.com/tfielding/llamero/internal/store"
+	"github.com/tfielding/llamero/internal/toolbox"
+	signaltransport "github.com/tfielding/llamero/internal/transport/signal"
 )
 
 var testJPEG = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'j', 'p', 'g', 0xFF, 0xD9}

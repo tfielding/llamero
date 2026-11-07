@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tfielding/signal-ollama/internal/ollama"
+	"github.com/tfielding/llamero/internal/ollama"
 )
 
 const summaryInstructions = "You keep a running summary of a conversation between a user and an AI assistant, " +

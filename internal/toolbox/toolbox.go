@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/tfielding/signal-ollama/internal/app"
+	"github.com/tfielding/llamero/internal/app"
 )
 
 const (

@@ -1,6 +1,6 @@
 .git
 .github
 data
-signal-ollama
+llamero
 *.md
 docker-compose*.yml
