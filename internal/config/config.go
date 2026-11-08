@@ -108,12 +108,14 @@ type Hook struct {
 	Model    string        // the model for its checks; empty = the recipient's chat model
 	Think    string        // thinking for its checks (on, off, low, medium, high); empty = the chat's setting
 	Tools    []string      // the only tools its checks get; empty = every read-only tool
+	Title    string        // the first line of its messages; empty = "🔔 <name>", "none" = no title line
 }
 
 const (
 	defaultHookGroup = 30 * time.Second
 	maxHookGroup     = 10 * time.Minute
 	maxHookCooldown  = 24 * time.Hour
+	maxHookTitle     = 60
 	minWebhookToken  = 16
 )
 
@@ -293,7 +295,10 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 			return nil, fmt.Errorf("webhooks.hooks in %s: %q is not a valid hook name (letters, digits, - and _)", s.f.path, name)
 		}
 		h := Hook{Name: name, Task: strings.TrimSpace(fh.Task), OnlyIf: strings.TrimSpace(fh.OnlyIf), Group: defaultHookGroup,
-			Model: strings.TrimSpace(fh.Model), Think: strings.ToLower(strings.TrimSpace(fh.Think)), Tools: fh.Tools}
+			Model: strings.TrimSpace(fh.Model), Think: strings.ToLower(strings.TrimSpace(fh.Think)), Tools: fh.Tools, Title: strings.TrimSpace(fh.Title)}
+		if strings.ContainsAny(h.Title, "\r\n") || len([]rune(h.Title)) > maxHookTitle {
+			return nil, fmt.Errorf("%s: title must be one line of at most %d characters", where, maxHookTitle)
+		}
 		if h.OnlyIf != "" && h.Task == "" {
 			return nil, fmt.Errorf("%s: only_if needs a task (without a task, events are sent on unchecked)", where)
 		}
@@ -662,6 +667,9 @@ func (c Config) Describe() string {
 		}
 		if len(h.Tools) > 0 {
 			parts = append(parts, "tools "+strings.Join(h.Tools, ", "))
+		}
+		if h.Title != "" {
+			parts = append(parts, "title "+h.Title)
 		}
 		parts = append(parts, "group "+h.Group.String())
 		if h.Cooldown > 0 {

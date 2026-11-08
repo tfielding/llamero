@@ -88,6 +88,7 @@ type fileHook struct {
 	Model    string     `yaml:"model"`
 	Think    string     `yaml:"think"`
 	Tools    stringList `yaml:"tools"`
+	Title    string     `yaml:"title"`
 }
 
 type fileServer struct {

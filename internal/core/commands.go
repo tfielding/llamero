@@ -14,7 +14,7 @@ import (
 func instant(text string) bool {
 	f := strings.Fields(strings.ToLower(text))
 	return len(f) > 0 && (f[0] == "/status" || f[0] == "/stats" || f[0] == "/stop" || f[0] == "/summary" || f[0] == "/settings" ||
-		f[0] == "/knowledge" || f[0] == "/schedules" || f[0] == "/learned" || f[0] == "/hooks")
+		f[0] == "/knowledge" || f[0] == "/schedules" || f[0] == "/hooks")
 }
 
 func isRetry(text string) bool {
@@ -61,8 +61,6 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 		return b.schedulesCommand(ctx, sender, args)
 	case "/knowledge":
 		return b.knowledgeText()
-	case "/learned":
-		return b.learnedCommand(args)
 	case "/hooks":
 		return b.hooksCommand()
 	case "/think":
@@ -134,7 +132,6 @@ const helpText = `Commands:
 /settings - current configuration (secrets hidden)
 /knowledge - notes the bot has from the knowledge folder
 /hooks - the latest hook checks and what each decided
-/learned - what hooks learned from your feedback on 🔔 messages
 /schedules - scheduled checks (delete, pause, resume or run with a number)
 /wake - wake the Ollama machine (Wake-on-LAN)
 /help - this message`

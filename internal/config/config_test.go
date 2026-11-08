@@ -470,6 +470,7 @@ func TestWebhookConfig(t *testing.T) {
       wake: true
       group: 1m
       cooldown: 5m
+      title: "📷 Camera"
       model: small-vision
       think: false
       tools: [review_alert, get_camera_frame]
@@ -495,7 +496,7 @@ func TestWebhookConfig(t *testing.T) {
 	}
 	d := c.Describe()
 	for _, want := range []string{"WEBHOOK_TOKEN: set\n",
-		"HOOK: /hooks/camera_alert (task: Look at the alert and say what happened.; only if: a person is at the door at night; to …0001; wakes Ollama; model small-vision; think off; tools review_alert, get_camera_frame; group 1m0s; cooldown 5m0s)",
+		"HOOK: /hooks/camera_alert (task: Look at the alert and say what happened.; only if: a person is at the door at night; to …0001; wakes Ollama; model small-vision; think off; tools review_alert, get_camera_frame; title 📷 Camera; group 1m0s; cooldown 5m0s)",
 		"HOOK: /hooks/leak (sends events on unchecked; group 0s)"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("settings lack %q:\n%s", want, d)
@@ -524,6 +525,7 @@ func TestWebhookConfig(t *testing.T) {
 		"bad group":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
 		"health off":    {"health: {addr: \"off\"}\nwebhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {}\n", "which is off"},
 		"bad think":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {task: x, think: lots}\n", "think must be on, off, low, medium or high"},
+		"long title":    {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {title: \"" + strings.Repeat("x", 61) + "\"}\n", "title must be one line of at most 60 characters"},
 		"model no task": {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {model: m}\n", "model, think and tools need a task"},
 		"unknown key":   {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {tsk: x}\n", `unknown setting "tsk"`},
 	} {

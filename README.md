@@ -57,13 +57,11 @@ Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
 | `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
-| `/learned` | What [hooks](#hooks) learned from your feedback on 🔔 messages |
-| `/learned clear <hook>` | Forget what one hook learned |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
 | `/wake` | Wake the Ollama machine (Wake-on-LAN) |
 | `/help` | This list |
 
-`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/hooks`, `/learned` and `/settings` answer
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/hooks` and `/settings` answer
 right away, even while a reply is being written.
 
 ## What it answers
@@ -253,7 +251,7 @@ Settings come from an optional config file, environment variables, or both.
 | `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
 | `WEBHOOK_TOKEN` | `webhooks.token` | none | Token [hook](#hooks) callers send as `Authorization: Bearer <token>`; at least 16 characters, required with hooks |
-| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group`, `cooldown`, `model`, `think`, `tools` |
+| | `webhooks.hooks.<name>` | none | A [hook](#hooks) at `POST /hooks/<name>`: `task`, `only_if`, `to`, `wake`, `group`, `cooldown`, `model`, `think`, `tools`, `title` |
 | `TZ` | | UTC | Time zone for schedules, e.g. `America/New_York` |
 | `KNOWLEDGE_DIR` | `knowledge.dir` | `/config/knowledge` | Folder of notes for the model |
 | `KNOWLEDGE_MAX_CHARS` | `knowledge.max_chars` | `8000` | Max characters the notes add to every message (about 2k tokens) |
@@ -417,6 +415,8 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   tool's description, so a short list makes each round quicker and keeps the model from wandering
   off. Tools that aren't read-only are never given to hooks, even if listed; names that aren't
   available are logged at each check.
+- **`title`:** the first line of the hook's messages, e.g. `📷 Camera` (at most 60 characters).
+  Default: 🔔 and the hook's name. `none` leaves it out, so a message is just the answer.
 - **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
   it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
   than nothing.
@@ -426,14 +426,6 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
 - `/hooks` shows the latest checks and what each decided, including the model's reason for
   "nothing to report", which helps when tuning `task` and `only_if`.
-
-**Learning from your feedback:** when a 🔔 message is wrong, say so, e.g. by replying to it with
-"false alarm, that's the plant". The model saves your verdict with the event and its own answer, and
-later checks of that hook get your recent verdicts as examples, so the same mistake is less likely.
-You can also say a message was right, or that something should have been reported. Verdicts are
-kept per hook (the latest 30) in `data/learned/<hook>.md`, a Markdown file you can read or edit;
-`/learned` lists them and `/learned clear <hook>` forgets them. Nothing about the kind of event is
-built in: a camera hook learns about false detections, a sensor hook about whatever you correct.
 
 **From Home Assistant:** a `rest_command` that any automation can call:
 

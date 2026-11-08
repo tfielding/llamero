@@ -48,6 +48,7 @@ ollama:
 #       # model: gemma3:12b             # the model for its checks; default: the chat's
 #       # think: off                    # thinking for its checks; default: the chat's /think
 #       # tools: [get_snapshot]         # only these tools; default: every read-only tool
+#       # title: "📷 Camera"            # first line of its messages; default: 🔔 and the name; none = no title
 #     leak: {}                          # no task: events are sent on as they are
 # knowledge:                           # notes for the model: .md files in this folder
 #   dir: /config/knowledge

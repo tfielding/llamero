@@ -150,7 +150,6 @@ func run() error {
 		Knowledge:    know,
 		Schedules:    schedules,
 		Hooks:        botHooks(cfg.Hooks),
-		LearnedDir:   learnedDir(cfg),
 		Allowed:      cfg.Allowed(),
 		DefaultModel: cfg.DefaultModel,
 		VisionModel:  cfg.VisionModel,
@@ -216,14 +215,6 @@ func listen(parent context.Context, router *transport.Router, ls []listener, han
 	return errors.New("a transport stopped listening")
 }
 
-// learnedDir is where verdicts on hook messages are kept: in the data folder, when there are hooks.
-func learnedDir(cfg config.Config) string {
-	if len(cfg.Hooks) == 0 {
-		return ""
-	}
-	return filepath.Join(cfg.DataDir, "learned")
-}
-
 // botHooks converts the configured hooks for the bot.
 func botHooks(hooks []config.Hook) map[string]core.Hook {
 	if len(hooks) == 0 {
@@ -232,7 +223,7 @@ func botHooks(hooks []config.Hook) map[string]core.Hook {
 	out := map[string]core.Hook{}
 	for _, h := range hooks {
 		out[h.Name] = core.Hook{Name: h.Name, Task: h.Task, OnlyIf: h.OnlyIf, To: h.To, Wake: h.Wake, Group: h.Group, Cooldown: h.Cooldown,
-			Model: h.Model, Think: h.Think, Tools: h.Tools}
+			Model: h.Model, Think: h.Think, Tools: h.Tools, Title: h.Title}
 	}
 	return out
 }

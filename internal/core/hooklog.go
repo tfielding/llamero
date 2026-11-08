@@ -107,3 +107,5 @@ func shorten(s string, n int) string {
 	}
 	return s
 }
+
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

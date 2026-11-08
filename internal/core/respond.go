@@ -122,9 +122,6 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []transport
 		if b.opt.Schedules != nil {
 			tools = append(tools, scheduleTools()...)
 		}
-		if b.feedbackOn() {
-			tools = append(tools, b.feedbackTool())
-		}
 	}
 	msgs := b.prompt(chat, tools, ollama.Message{Role: "user", Content: text, Images: photos})
 
@@ -364,8 +361,6 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 			switch {
 			case isScheduleTool(name):
 				out = b.callScheduleTool(sender, name, tc.Function.Arguments)
-			case name == toolHookFeedback:
-				out = b.callFeedbackTool(tc.Function.Arguments)
 			default:
 				out, err = b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
 			}

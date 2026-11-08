@@ -25,6 +25,7 @@ type Hook struct {
 	Model    string        // the model for its checks; empty = the recipient's chat model
 	Think    string        // thinking for its checks; empty = the chat's setting
 	Tools    []string      // the only tools its checks get; empty = every read-only tool
+	Title    string        // the first line of its messages; empty = "🔔 <name>", "none" = no title line
 }
 
 const (
@@ -102,6 +103,30 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	return true
 }
 
+// titled puts the hook's title line (and a note, if any, in brackets) above body. With bold set
+// (for Markdown messages from the model), the title is bold.
+func (h Hook) titled(note, body string, bold bool) string {
+	title := h.Title
+	if strings.EqualFold(title, "none") {
+		if note == "" {
+			return body
+		}
+		return "(" + note + ")\n\n" + body
+	}
+	switch {
+	case title == "" && bold:
+		title = "🔔 **" + h.Name + "**"
+	case title == "":
+		title = "🔔 " + h.Name
+	case bold:
+		title = "**" + title + "**"
+	}
+	if note != "" {
+		title += " (" + note + ")"
+	}
+	return title + "\n\n" + body
+}
+
 // hookRecipients is who gets a hook's messages: its To, or everyone allowed.
 func (b *Bot) hookRecipients(h Hook) []string {
 	if len(h.To) > 0 {
@@ -123,7 +148,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	start := time.Now()
 	events := eventList(run)
 	if h.Task == "" {
-		b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 %s\n\n%s", h.Name, events)})
+		b.sendHook(ctx, h, run, to, response{text: h.titled("", events, false)})
 		slog.Info("hook events sent on", "hook", h.Name, "events", len(run.events)+run.dropped)
 		b.logHook(h.Name, runKeys(run), firstEvent(run), "sent on unchecked (no task)", 0)
 		return
@@ -131,7 +156,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	unchecked := func(why string) {
 		slog.Warn("hook events sent unchecked", "hook", h.Name, "reason", why)
 		b.logHook(h.Name, runKeys(run), firstEvent(run), "sent unchecked: "+why, time.Since(start))
-		b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 %s (not checked: %s)\n\n%s", h.Name, why, events)})
+		b.sendHook(ctx, h, run, to, response{text: h.titled("not checked: "+why, events, false)})
 	}
 	if err := b.llm.Ping(ctx); err != nil {
 		switch {
@@ -145,7 +170,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		}
 	}
 	// Checks don't need the chat: no history, so every model call has less to read.
-	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events, b.learnedForCheck(h.Name)),
+	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events),
 		checkOptions{model: h.Model, think: h.Think, tools: h.Tools, noHistory: true})
 	switch {
 	case stopped:
@@ -174,10 +199,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		b.logHook(h.Name, runKeys(run), firstEvent(run), outcome, time.Since(start))
 		return
 	}
-	b.sendHook(ctx, h, run, to, response{text: fmt.Sprintf("🔔 **%s**\n\n%s", h.Name, answer), fromModel: true, images: images})
-	b.mu.Lock()
-	b.lastHook[h.Name] = hookResult{events: events, answer: answer} // what "that was a false alarm" refers to
-	b.mu.Unlock()
+	b.sendHook(ctx, h, run, to, response{text: h.titled("", answer, true), fromModel: true, images: images})
 	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
 	b.logHook(h.Name, runKeys(run), firstEvent(run), "sent", time.Since(start))
 	for _, r := range to {
@@ -224,10 +246,9 @@ func eventList(run *hookRun) string {
 }
 
 // hookTask is the message the model gets for a hook's events.
-func hookTask(h Hook, events, learned string) string {
+func hookTask(h Hook, events string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "(Sent by another system through the hook %q, set up by the user. This is not a new message from them.)\n", h.Name)
-	sb.WriteString(learned)
 	fmt.Fprintf(&sb, "What happened:\n%s\n\n", events)
 	fmt.Fprintf(&sb, "Do this now, using your tools to look things up: %s\n", h.Task)
 	if h.OnlyIf != "" {

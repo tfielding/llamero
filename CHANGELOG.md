@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Hook `title`: the first line of a hook's messages, e.g. `📷 Camera` instead of "🔔 camera_alert",
+  or `none` for no title line.
 - `ollama.backup_url` (`OLLAMA_BACKUP_URL`): another address for Ollama, used when the main one
   can't be reached, e.g. a laptop's VPN address while it's away from home. The main address is
   tried first again after a minute.
@@ -15,6 +17,11 @@ All notable changes to this project are documented here. The format follows
 - An Ollama address that doesn't answer now fails after 3 seconds instead of waiting for the
   request timeout, so "Ollama is offline" (and Wake-on-LAN, and unchecked hook events) happen
   right away.
+
+### Removed
+- Learning from feedback on hook messages (the `hook_feedback` tool and `/learned`): saved verdicts
+  only described past events in words, which didn't help checks tell new pictures apart. Old
+  verdicts in `data/learned/` are no longer read and can be deleted.
 
 ## [0.2.0] - 2026-11-07
 

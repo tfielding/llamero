@@ -2,7 +2,6 @@ package core
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -191,95 +190,6 @@ func TestHookOnlyIfWithPictures(t *testing.T) {
 	}
 }
 
-func TestHookFeedback(t *testing.T) {
-	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "a real person is there"})
-	b.opt.LearnedDir = t.TempDir()
-	l.answer = "A person is at the door."
-	b.Hook(b.ctx, "door", "person on front_door", "")
-	reply(t, m)
-
-	// The user says it was wrong; the model saves it without asking for approval.
-	l.mu.Lock()
-	l.toolCall = call(toolHookFeedback, map[string]any{"hook": "door", "verdict": "false_alarm", "note": "it's the plant"})
-	l.answer = "Noted."
-	l.mu.Unlock()
-	b.Handle(dm(me, "that was a false alarm, it's the plant"))
-	if got := reply(t, m); got != "Noted." {
-		t.Fatalf("got %q", got)
-	}
-	l.mu.Lock()
-	offered := strings.Join(l.offered, ",")
-	l.toolCall = nil
-	l.mu.Unlock()
-	if !strings.Contains(offered, toolHookFeedback) {
-		t.Errorf("offered %s", offered)
-	}
-	lines := b.learned("door")
-	if len(lines) != 1 || !strings.Contains(lines[0], `false alarm: reported, but it shouldn't have been. Event: person on front_door. `+
-		`The check said: "A person is at the door.". The user: "it's the plant"`) {
-		t.Fatalf("learned: %q", lines)
-	}
-
-	// The next check of that hook gets it.
-	b.Hook(b.ctx, "door", "person on front_door", "")
-	reply(t, m)
-	l.mu.Lock()
-	last := l.last[len(l.last)-1].Content
-	l.mu.Unlock()
-	if !strings.Contains(last, "The user's verdicts on earlier events from this hook") || !strings.Contains(last, "it's the plant") {
-		t.Errorf("check prompt:\n%s", last)
-	}
-
-	// /learned lists and clears.
-	b.Handle(dm(me, "/learned"))
-	if got := reply(t, m); !strings.Contains(got, "door (1):\n- ") || !strings.Contains(got, "/learned clear <hook>") {
-		t.Errorf("/learned: %q", got)
-	}
-	b.Handle(dm(me, "/learned clear door"))
-	if got := reply(t, m); got != "Cleared what door had learned." || len(b.learned("door")) != 0 {
-		t.Errorf("clear: %q", got)
-	}
-
-	// Mistakes the model can correct.
-	for _, tc := range []struct {
-		args map[string]any
-		want string
-	}{
-		{map[string]any{"hook": "nope", "verdict": "correct"}, `there is no hook named "nope"`},
-		{map[string]any{"hook": "door", "verdict": "meh"}, "verdict must be"},
-	} {
-		if out := b.callFeedbackTool(tc.args); !out.IsError || !strings.Contains(out.Text, tc.want) {
-			t.Errorf("%v: %+v", tc.args, out)
-		}
-	}
-	b.mu.Lock()
-	delete(b.lastHook, "door")
-	b.mu.Unlock()
-	if out := b.callFeedbackTool(map[string]any{"hook": "door", "verdict": "missed"}); !out.IsError || !strings.Contains(out.Text, "say which event") {
-		t.Errorf("no event: %+v", out)
-	}
-	if out := b.callFeedbackTool(map[string]any{"hook": "door", "verdict": "missed", "event": "the courier at 14:10"}); out.IsError {
-		t.Errorf("missed with event: %+v", out)
-	}
-}
-
-func TestLearnedKeepsNewest(t *testing.T) {
-	b, _, _, _ := setupHooks(t, Hook{Name: "door", Task: "x"})
-	b.opt.LearnedDir = t.TempDir()
-	for i := 0; i < maxLearned+5; i++ {
-		if err := b.addLearned("door", fmt.Sprintf("- entry %d", i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	lines := b.learned("door")
-	if len(lines) != maxLearned || lines[0] != "- entry 5" || lines[len(lines)-1] != fmt.Sprintf("- entry %d", maxLearned+4) {
-		t.Errorf("%d lines, first %q, last %q", len(lines), lines[0], lines[len(lines)-1])
-	}
-	if got := b.learnedForCheck("door"); !strings.HasSuffix(got, fmt.Sprintf("- entry %d\n\n", maxLearned+4)) {
-		t.Errorf("for check: %q", got)
-	}
-}
-
 func TestHookCooldown(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check it.", Cooldown: 300 * time.Millisecond})
 	l.answer = "Someone is there."
@@ -406,5 +316,33 @@ func TestHookLeanRun(t *testing.T) {
 	}
 	if !saved() {
 		t.Error("hook result not in the chat's history")
+	}
+}
+
+func TestHookTitle(t *testing.T) {
+	for _, tc := range []struct {
+		title, note string
+		bold        bool
+		want        string
+	}{
+		{"", "", true, "🔔 **door**\n\nbody"},
+		{"", "not checked: x", false, "🔔 door (not checked: x)\n\nbody"},
+		{"📷 Camera", "", true, "**📷 Camera**\n\nbody"},
+		{"📷 Camera", "not checked: x", false, "📷 Camera (not checked: x)\n\nbody"},
+		{"none", "", true, "body"},
+		{"None", "not checked: x", false, "(not checked: x)\n\nbody"},
+	} {
+		h := Hook{Name: "door", Title: tc.title}
+		if got := h.titled(tc.note, "body", tc.bold); got != tc.want {
+			t.Errorf("title %q note %q: got %q, want %q", tc.title, tc.note, got, tc.want)
+		}
+	}
+
+	// A checked message uses it.
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", Title: "📷 Camera"})
+	l.answer = "Someone is there."
+	b.Hook(b.ctx, "door", "person on front_door", "")
+	if got := reply(t, m); got != "**📷 Camera**\n\nSomeone is there." {
+		t.Errorf("got %q", got)
 	}
 }
