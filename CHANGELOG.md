@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `/snooze`: mute hooks for a while, for the person who asks: all of them (`/snooze 2h`), one
+  (`/snooze camera_alert 30m`), or one hook's events for one key such as a camera
+  (`/snooze camera_alert front_door 1h`). `/snooze` lists them and `/snooze off` ends them.
 - Hook `title`: the first line of a hook's messages, e.g. `📷 Camera` instead of "🔔 camera_alert",
   or `none` for no title line.
 - `ollama.backup_url` (`OLLAMA_BACKUP_URL`): another address for Ollama, used when the main one

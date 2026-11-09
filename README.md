@@ -57,11 +57,13 @@ Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
 | `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
+| `/snooze 2h` | Mute every [hook](#hooks) for you for a while (`30m`, `1h30m`, `1d`, up to `7d`); `/snooze <hook> 2h` mutes one, `/snooze <hook> <key> 2h` one hook's events for one key (e.g. a camera) |
+| `/snooze` | What you've snoozed; `/snooze off` (or `/snooze <hook> off`) unmutes |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
 | `/wake` | Wake the Ollama machine (Wake-on-LAN) |
 | `/help` | This list |
 
-`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/hooks` and `/settings` answer
+`/status`, `/stats`, `/stop`, `/summary`, `/knowledge`, `/schedules`, `/hooks`, `/snooze` and `/settings` answer
 right away, even while a reply is being written.
 
 ## What it answers
@@ -426,6 +428,11 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
 - `/hooks` shows the latest checks and what each decided, including the model's reason for
   "nothing to report", which helps when tuning `task` and `only_if`.
+- `/snooze` mutes hooks for a while, for the person who sends it: during yard work, or when
+  guests are expected. `/snooze 2h` mutes them all, `/snooze camera_alert 30m` one, and
+  `/snooze camera_alert front_door 1h` only that hook's events sent with that `key`. Muted events
+  aren't checked when everyone who'd get them has snoozed, so they cost no model time; `/hooks`
+  lists them as skipped. Snoozes are kept in memory, so a restart ends them.
 
 **From Home Assistant:** a `rest_command` that any automation can call:
 

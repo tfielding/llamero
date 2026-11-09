@@ -59,6 +59,11 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		b.logHook(name, []string{key}, text, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
 		return true
 	}
+	if to, left := b.awake(h, map[string]bool{key: true}); len(to) == 0 && left > 0 {
+		slog.Info("hook event skipped: snoozed", "hook", name, "key", key, "for", left.Round(time.Second))
+		b.logHook(name, []string{key}, text, "skipped: snoozed for "+humanDuration(left), 0)
+		return true
+	}
 	if r := []rune(strings.TrimSpace(text)); len(r) > maxHookEventChars {
 		text = string(r[:maxHookEventChars]) + "…"
 	}
@@ -144,7 +149,13 @@ func (b *Bot) hookRecipients(h Hook) []string {
 // sent on as they are.
 func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	h := b.opt.Hooks[run.name]
-	to := b.hookRecipients(h)
+	// Someone may have snoozed the hook while the events were being grouped.
+	to, left := b.awake(h, run.keys)
+	if len(to) == 0 {
+		slog.Info("hook events skipped: snoozed", "hook", h.Name, "events", len(run.events)+run.dropped)
+		b.logHook(h.Name, runKeys(run), firstEvent(run), "skipped: snoozed for "+humanDuration(left), 0)
+		return
+	}
 	start := time.Now()
 	events := eventList(run)
 	if h.Task == "" {
