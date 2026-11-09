@@ -121,7 +121,8 @@ transports:
 - No public URL or open port: Llamero asks Telegram for new messages (long polling).
 - A bot token can only be used by one program at a time. If another program polls with it, or a
   webhook is set for it, Llamero says so in the log.
-- Inside Llamero, Telegram people are `telegram:<id>`, e.g. in a hook's `to:`.
+- Inside Llamero, Telegram people are `telegram:<id>`, e.g. in a hook's `to:`. Signal ids can be
+  written the same way, `signal:+15551234567`, or without the prefix: both mean the same.
 
 ## Run
 
@@ -225,7 +226,7 @@ Settings come from an optional config file, environment variables, or both.
 | Variable | config.yml | Default | |
 |---|---|---|---|
 | `SIGNAL_NUMBER` | `transports.signal.number` | none | [Signal](#signal): the number registered in signal-cli-rest-api; sets up Signal |
-| `SIGNAL_ALLOWED_SENDERS` | `transports.signal.allowed_senders` | required with Signal | Phone numbers (or Signal account ids) allowed to use the bot through Signal; comma-separated, or a list in the file |
+| `SIGNAL_ALLOWED_SENDERS` | `transports.signal.allowed_senders` | required with Signal | Phone numbers (or Signal account ids) allowed to use the bot through Signal, with or without `signal:` in front; comma-separated, or a list in the file |
 | `SIGNAL_URL` | `transports.signal.url` | `http://signal-cli-rest-api:8080` | |
 | `TELEGRAM_TOKEN` | `transports.telegram.token` | none | [Telegram](#telegram): the bot token from @BotFather; sets up Telegram |
 | `TELEGRAM_ALLOWED_SENDERS` | `transports.telegram.allowed_senders` | required with Telegram | Telegram user ids allowed to use the bot; comma-separated, or a list in the file |
@@ -401,6 +402,16 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   runs once, with the first one's model (unless `model` is set) but without their chat history;
   the result goes to all of them and joins each one's conversation, so "show me that" works
   afterwards.
+  `to` can also name group chats, alone or with people: a Signal group as `signal:group.<id>`, a
+  Telegram group as `telegram:-<id>`. Groups only receive: the bot doesn't answer messages in
+  them, so nobody can chat with it or run commands there, and follow-ups (and `/snooze`) happen
+  in private chats. A hook with only groups in `to` sends to no one else. To find a group's id,
+  add the bot to the group and send a message there: the log says
+  `ignoring messages in a group chat … group=<id>`, once per group. With Signal, the bot's number
+  has to be a member (signal-cli-rest-api's `GET /v1/groups/<number>` also lists the ids, without
+  `signal:`, which is optional).
+  With Telegram, bots in groups only see commands unless privacy mode is off in @BotFather, so
+  send something like `/hello@<your bot>`.
 - **`group`:** events within this long of the first are checked together in one run (default
   `30s`, at most `10m`, `0` for each on its own), so one person walking past three cameras is one
   message. Up to 10 events are listed per run; more are counted.

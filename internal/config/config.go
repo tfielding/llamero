@@ -101,7 +101,8 @@ type Hook struct {
 	Name     string
 	Task     string        // what the model does with the events; empty = send them on unchanged
 	OnlyIf   string        // report only when this is true
-	To       []string      // who gets the result; empty = everyone allowed
+	To       []string      // people who get the result; empty (and no Groups) = everyone allowed
+	Groups   []string      // group chats that get the result: Signal "group.…", Telegram "telegram:-…"; receive only
 	Wake     bool          // wake the Ollama machine if it's asleep
 	Group    time.Duration // events this soon after the first are handled together
 	Cooldown time.Duration // after a message, events (with the same key) are skipped for this long; 0 = off
@@ -236,7 +237,7 @@ func (s settings) signal() (Signal, error) {
 	sig := Signal{URL: strings.TrimRight(s.get("SIGNAL_URL", "http://signal-cli-rest-api:8080"), "/"), Number: s.get("SIGNAL_NUMBER", ""),
 		Allowed: map[string]bool{}}
 	for _, v := range strings.Split(s.get("SIGNAL_ALLOWED_SENDERS", ""), ",") {
-		if v = strings.TrimSpace(v); v != "" {
+		if v = strings.TrimPrefix(strings.TrimSpace(v), signalPrefix); v != "" {
 			sig.Allowed[v] = true
 		}
 	}
@@ -279,6 +280,17 @@ func (s settings) telegram() (Telegram, error) {
 
 var telegramToken = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
 
+// signalPrefix may start any Signal id in the config (signal:+15551234567, signal:group.…), like
+// telegram: for Telegram's. Signal ids are used without it: they're the unprefixed ones.
+const signalPrefix = "signal:"
+
+// Group chats a hook can send to: signal-cli-rest-api's group ids, and Telegram's group chat ids
+// (negative).
+var (
+	signalGroup   = regexp.MustCompile(`^group\.[A-Za-z0-9+/=]+$`)
+	telegramGroup = regexp.MustCompile(`^telegram:-\d+$`)
+)
+
 // hooks returns webhooks.hooks from the file, checked: valid names, a task for only_if, and
 // recipients who are allowed senders.
 func (s settings) hooks(c Config) ([]Hook, error) {
@@ -313,10 +325,20 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 			return nil, fmt.Errorf("%s: think must be on, off, low, medium or high", where)
 		}
 		for _, r := range fh.To {
-			if !c.Allowed()[r] {
-				return nil, fmt.Errorf("%s: to: %s is not allowed on any transport (allowed_senders; Telegram ids as telegram:<id>)", where, mask(r))
+			r = strings.TrimPrefix(strings.TrimSpace(r), signalPrefix)
+			switch {
+			case c.Allowed()[r]:
+				h.To = append(h.To, r)
+			case signalGroup.MatchString(r) && c.Signal.On(), telegramGroup.MatchString(r) && c.Telegram.On():
+				h.Groups = append(h.Groups, r)
+			case signalGroup.MatchString(r):
+				return nil, fmt.Errorf("%s: to: %s is a Signal group, but Signal isn't set up", where, mask(r))
+			case telegramGroup.MatchString(r):
+				return nil, fmt.Errorf("%s: to: %s is a Telegram group, but Telegram isn't set up", where, mask(r))
+			default:
+				return nil, fmt.Errorf("%s: to: %s is not allowed on any transport (allowed_senders; Telegram ids as telegram:<id>) "+
+					"and isn't a group (signal:group.…, telegram:-<id>)", where, mask(r))
 			}
-			h.To = append(h.To, r)
 		}
 		if v := strings.TrimSpace(fh.Wake); v != "" {
 			var err error
@@ -649,10 +671,13 @@ func (c Config) Describe() string {
 		if h.OnlyIf != "" {
 			parts = append(parts, "only if: "+h.OnlyIf)
 		}
-		if len(h.To) > 0 {
-			to := make([]string, len(h.To))
-			for i, r := range h.To {
-				to[i] = mask(r)
+		if len(h.To)+len(h.Groups) > 0 {
+			var to []string
+			for _, r := range h.To {
+				to = append(to, mask(r))
+			}
+			for _, g := range h.Groups {
+				to = append(to, "group "+mask(g))
 			}
 			parts = append(parts, "to "+strings.Join(to, " "))
 		}

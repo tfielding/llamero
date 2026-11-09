@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +19,8 @@ type Hook struct {
 	Name     string
 	Task     string        // what the model does with the events; empty = send them on unchanged
 	OnlyIf   string        // report only when this is true; empty = always report
-	To       []string      // who gets the result; empty = everyone allowed
+	To       []string      // people who get the result; empty (and no Groups) = everyone allowed
+	Groups   []string      // group chats that also get it; they can't talk back, snooze or follow up
 	Wake     bool          // wake the Ollama machine if it's asleep, instead of sending the events unchecked
 	Group    time.Duration // events within this long of the first are handled together
 	Cooldown time.Duration // after a message, events with the same key are skipped for this long; 0 = off
@@ -59,7 +61,7 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		b.logHook(name, outCooling, []string{key}, text, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
 		return true
 	}
-	if to, left := b.awake(h, map[string]bool{key: true}); len(to) == 0 && left > 0 {
+	if to, left := b.awake(h, map[string]bool{key: true}); len(to) == 0 && len(h.Groups) == 0 && left > 0 {
 		slog.Info("hook event skipped: snoozed", "hook", name, "key", key, "for", left.Round(time.Second))
 		b.logHook(name, outSnoozed, []string{key}, text, "skipped: snoozed for "+humanDuration(left), 0)
 		return true
@@ -99,8 +101,8 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		delete(b.hookRuns, name)
 		b.mu.Unlock()
 		// The run goes in the first recipient's queue, behind their own messages, and uses
-		// their chat's model.
-		to := b.hookRecipients(h)
+		// their chat's model (a group's, which is the default, if it only goes to groups).
+		to := slices.Concat(b.hookRecipients(h), h.Groups)
 		if len(to) == 0 || !b.enqueue(ctx, to[0], message{hook: run}) {
 			slog.Warn("hook events dropped", "hook", name, "events", len(run.events)+run.dropped)
 		}
@@ -132,9 +134,10 @@ func (h Hook) titled(note, body string, bold bool) string {
 	return title + "\n\n" + body
 }
 
-// hookRecipients is who gets a hook's messages: its To, or everyone allowed.
+// hookRecipients is which people get a hook's messages: its To, or everyone allowed if it has no
+// To and no Groups. Groups get them too, but aren't people: see Hook.Groups.
 func (b *Bot) hookRecipients(h Hook) []string {
-	if len(h.To) > 0 {
+	if len(h.To) > 0 || len(h.Groups) > 0 {
 		return h.To
 	}
 	var all []string
@@ -149,8 +152,9 @@ func (b *Bot) hookRecipients(h Hook) []string {
 // sent on as they are.
 func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	h := b.opt.Hooks[run.name]
-	// Someone may have snoozed the hook while the events were being grouped.
-	to, left := b.awake(h, run.keys)
+	// Someone may have snoozed the hook while the events were being grouped. Groups can't snooze.
+	people, left := b.awake(h, run.keys)
+	to := slices.Concat(people, h.Groups)
 	if len(to) == 0 {
 		slog.Info("hook events skipped: snoozed", "hook", h.Name, "events", len(run.events)+run.dropped)
 		b.logHook(h.Name, outSnoozed, runKeys(run), firstEvent(run), "skipped: snoozed for "+humanDuration(left), 0)
@@ -213,7 +217,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	b.sendHook(ctx, h, run, to, response{text: h.titled("", answer, true), fromModel: true, images: images})
 	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
 	b.logHook(h.Name, outSent, runKeys(run), firstEvent(run), "sent", time.Since(start))
-	for _, r := range to {
+	for _, r := range people { // groups can't follow up, so they have no conversation to add to
 		b.remember(r, fmt.Sprintf("(Event from %s: %s)", h.Name, strings.ReplaceAll(events, "\n", " ")), answer, len(images))
 	}
 }

@@ -103,3 +103,10 @@ func TestRouterErrors(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+func TestGroupLog(t *testing.T) {
+	var g GroupLog
+	if !g.First("group.a") || g.First("group.a") || !g.First("group.b") {
+		t.Error("each id should be first once")
+	}
+}

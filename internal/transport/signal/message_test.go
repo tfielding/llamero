@@ -35,6 +35,10 @@ func TestMessageKeepsOnlyDirectMessages(t *testing.T) {
 			t.Errorf("%s: kept %+v", name, m)
 		}
 	}
+	// The group is noted (and logged) by the id hooks send to: "group." and the id in base64.
+	if c.groups.First("group.YWJj") {
+		t.Error("the group's id wasn't noted")
+	}
 
 	// A reply to the bot, with a photo, from someone with an account id.
 	env := dm("  what's this?  ")

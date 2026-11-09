@@ -148,6 +148,9 @@ func TestListen(t *testing.T) {
 	if ok, since, _ := c.Status(); !ok || since.IsZero() {
 		t.Error("not connected")
 	}
+	if c.groups.First("telegram:-99") {
+		t.Error("the group's id wasn't noted")
+	}
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Errorf("Listen: %v", err)

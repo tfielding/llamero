@@ -346,3 +346,52 @@ func TestHookTitle(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestHookToGroups(t *testing.T) {
+	const group = "group.ZmVkY2JhOTg3NjU0MzIxMA=="
+	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check it.", Groups: []string{group}})
+	l.answer = "Someone is at the door."
+	b.Hook(b.ctx, "cams", "person on front_door", "front_door")
+	reply(t, m)
+	expectSilence(t, m) // only the group: To is empty, but that's not "everyone allowed" with a group
+	m.mu.Lock()
+	sent := m.sent[len(m.sent)-1]
+	m.mu.Unlock()
+	if sent != group+": 🔔 **cams**\n\nSomeone is at the door." {
+		t.Errorf("sent %q", sent)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if chat, _ := b.store.Load(me); len(chat.History) != 0 {
+		t.Errorf("my history: %+v", chat.History)
+	}
+	if chat, _ := b.store.Load(group); len(chat.History) != 0 {
+		t.Errorf("a group got a conversation: %+v", chat.History)
+	}
+
+	// A group and a person: the person's snooze doesn't mute the group, and only the person
+	// gets the alert in their conversation.
+	b2, m2, l2, _ := setupHooks(t, Hook{Name: "cams", Task: "Check it.", To: []string{me}, Groups: []string{group}})
+	l2.answer = "Someone is at the door."
+	b2.Hook(b2.ctx, "cams", "person on front_door", "front_door")
+	reply(t, m2)
+	reply(t, m2)
+	chat, _ := b2.store.Load(me)
+	for i := 0; i < 50 && len(chat.History) == 0; i++ {
+		time.Sleep(10 * time.Millisecond)
+		chat, _ = b2.store.Load(me)
+	}
+	if len(chat.History) != 2 {
+		t.Errorf("my history: %+v", chat.History)
+	}
+	b2.Handle(dm(me, "/snooze 1h"))
+	reply(t, m2)
+	b2.Hook(b2.ctx, "cams", "person on garden", "garden")
+	reply(t, m2)
+	expectSilence(t, m2)
+	m2.mu.Lock()
+	sent = m2.sent[len(m2.sent)-1]
+	m2.mu.Unlock()
+	if !strings.HasPrefix(sent, group+": ") {
+		t.Errorf("sent %q, want it only to the group", sent)
+	}
+}

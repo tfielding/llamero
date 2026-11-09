@@ -3,10 +3,13 @@
 //
 // A transport turns its app's events into Messages, keeping only direct messages from other
 // people: group chats, its own outgoing messages, receipts and typing events never reach the
-// core. Who may use the bot is the core's decision (its allowlist), not the transport's.
+// core (though hooks can send to groups: see GroupLog). Who may use the bot is the core's decision (its allowlist), not the transport's.
 package transport
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // Message is a direct message to the bot.
 type Message struct {
@@ -51,4 +54,26 @@ type Messenger interface {
 	React(ctx context.Context, recipient string, id int64, emoji string, remove bool) error
 	// Attachment fetches the contents of a received file by its id.
 	Attachment(ctx context.Context, id string) ([]byte, error)
+}
+
+// GroupLog remembers which group chats a transport has logged, so each is logged once: the bot
+// doesn't chat in groups, but hooks can send to them, and the log line is how people find a
+// group's id. The zero value is ready to use.
+type GroupLog struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+// First reports whether id hasn't been seen before, and remembers it.
+func (g *GroupLog) First(id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.seen[id] {
+		return false
+	}
+	if g.seen == nil {
+		g.seen = map[string]bool{}
+	}
+	g.seen[id] = true
+	return true
 }

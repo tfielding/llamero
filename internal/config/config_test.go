@@ -520,6 +520,8 @@ func TestWebhookConfig(t *testing.T) {
 		"bad name":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    \"front door\": {}\n", `"front door" is not a valid hook name`},
 		"only_if":       {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {only_if: x}\n", "only_if needs a task"},
 		"stranger":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"+15550009999\"]}\n", "to: …9999 is not allowed on any transport"},
+		"tg group off":  {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"telegram:-1001234567\"]}\n", "to: …4567 is a Telegram group, but Telegram isn't set up"},
+		"not a group":   {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"group.not valid!\"]}\n", "and isn't a group (signal:group.…, telegram:-<id>)"},
 		"bad wake":      {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {wake: often}\n", "wake must be true or false"},
 		"bad cooldown":  {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {cooldown: 2d}\n", "cooldown must be a duration from 0 to 24h"},
 		"bad group":     {"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {group: 2h}\n", "group must be a duration from 0 to 10m0s"},
@@ -552,7 +554,7 @@ func TestTelegramConfig(t *testing.T) {
 webhooks:
   token: 0123456789abcdef0
   hooks:
-    door: {task: check, to: ["telegram:123456789"]}
+    door: {task: check, to: ["telegram:123456789", "telegram:-1001234567"]}
 `)
 	t.Setenv("TG_TOKEN", "4242:AAH-secret_part")
 	c, err := Load()
@@ -565,8 +567,8 @@ webhooks:
 	if a := c.Allowed(); len(a) != 2 || !a["telegram:123456789"] || !a["telegram:42"] {
 		t.Errorf("allowed: %v", a)
 	}
-	if c.Hooks[0].To[0] != "telegram:123456789" {
-		t.Errorf("hook to: %v", c.Hooks[0].To)
+	if h := c.Hooks[0]; len(h.To) != 1 || h.To[0] != "telegram:123456789" || len(h.Groups) != 1 || h.Groups[0] != "telegram:-1001234567" {
+		t.Errorf("hook to: %v, groups: %v", h.To, h.Groups)
 	}
 	d := c.Describe()
 	if !strings.Contains(d, "TELEGRAM_TOKEN: set\n") || strings.Contains(d, "secret_part") || strings.Contains(d, "SIGNAL_") {
@@ -577,6 +579,18 @@ webhooks:
 	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\n  telegram: {token: \"1:abc\", allowed_senders: 7}\n")
 	if c, err = Load(); err != nil || !c.Signal.On() || !c.Telegram.On() || len(c.Allowed()) != 2 {
 		t.Fatalf("%v %v", err, c.Allowed())
+	}
+
+	// A Signal group, as signal-cli-rest-api names it; Signal ids may start with signal:, like
+	// Telegram's with telegram:, and are used without it.
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"signal:+15550000001\"}\n"+
+		"webhooks:\n  token: 0123456789abcdef0\n  hooks:\n    door: {to: [\"group.ZmVkY2JhOTg3NjU0MzIxMA==\", \"signal:group.YWJj\", \"signal:+15550000001\"]}\n")
+	if c, err = Load(); err != nil || !c.Allowed()["+15550000001"] || len(c.Hooks[0].To) != 1 || c.Hooks[0].To[0] != "+15550000001" ||
+		len(c.Hooks[0].Groups) != 2 || c.Hooks[0].Groups[1] != "group.YWJj" {
+		t.Fatalf("%v %+v", err, c.Hooks)
+	}
+	if d := c.Describe(); !strings.Contains(d, "to …0001 group …MA== group …YWJj") {
+		t.Errorf("settings:\n%s", d)
 	}
 
 	for name, tc := range map[string]struct{ yml, want string }{

@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Hooks can send to group chats: put a Signal group (`signal:group.<id>`) or a Telegram group
+  (`telegram:-<id>`) in a hook's `to`, alone or with people. Groups only receive messages; the
+  bot still only chats one to one, and logs a group's id (once) when it ignores a message there.
+- Signal ids in the config can start with `signal:` (`signal:+15551234567`), like Telegram's with
+  `telegram:`. Without it works as before.
 - `/hooks stats`: totals per hook since the bot started: checked, sent and nothing to report,
   sent unchecked and why, skipped (cooling down, snoozed), check times, and the busiest keys.
 - `/snooze`: mute hooks for a while, for the person who asks: all of them (`/snooze 2h`), one

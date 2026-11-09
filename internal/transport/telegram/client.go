@@ -48,6 +48,7 @@ type Client struct {
 	since     time.Time
 	lastErr   error
 	typing    map[string]chan struct{} // chats with a typing indicator running, closed to renew
+	groups    transport.GroupLog
 }
 
 // New returns a client for the bot with token, at base (DefaultURL, or a self-hosted Bot API

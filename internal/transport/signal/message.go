@@ -1,6 +1,8 @@
 package signal
 
 import (
+	"encoding/base64"
+	"log/slog"
 	"strings"
 
 	"github.com/tfielding/llamero/internal/transport"
@@ -11,7 +13,14 @@ import (
 // messages), receipts and typing events are dropped.
 func (c *Client) message(env Envelope) (transport.Message, bool) {
 	dm := env.DataMessage
-	if dm == nil || dm.GroupInfo != nil {
+	if dm == nil {
+		return transport.Message{}, false
+	}
+	if g := dm.GroupInfo; g != nil {
+		// signal-cli-rest-api sends to a group by "group." and its internal id in base64 again.
+		if id := "group." + base64.StdEncoding.EncodeToString([]byte(g.GroupID)); g.GroupID != "" && c.groups.First(id) {
+			slog.Info("ignoring messages in a group chat (the bot only chats one to one); to send hook messages there, put its id in a hook's to", "group", "signal:"+id)
+		}
 		return transport.Message{}, false
 	}
 	text := strings.TrimSpace(dm.Message)

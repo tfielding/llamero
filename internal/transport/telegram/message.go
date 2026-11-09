@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -56,6 +57,12 @@ type file struct {
 // dropped.
 func (c *Client) message(u update) (transport.Message, bool) {
 	m := u.Message
+	if m != nil && (m.Chat.Type == "group" || m.Chat.Type == "supergroup") {
+		if id := Prefix + ":" + strconv.FormatInt(m.Chat.ID, 10); c.groups.First(id) {
+			slog.Info("ignoring messages in a group chat (the bot only chats one to one); to send hook messages there, put its id in a hook's to", "group", id)
+		}
+		return transport.Message{}, false
+	}
 	if m == nil || m.Chat.Type != "private" || m.From == nil || m.From.IsBot {
 		return transport.Message{}, false
 	}

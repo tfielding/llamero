@@ -72,6 +72,7 @@ type Client struct {
 	connected bool
 	since     time.Time // when the current connection was made
 	lastErr   error     // why the last connection ended (or failed)
+	groups    transport.GroupLog
 }
 
 func New(baseURL, number string) *Client {
