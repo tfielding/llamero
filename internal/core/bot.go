@@ -73,6 +73,8 @@ type Bot struct {
 	cooldowns map[string]time.Time    // until when each hook (and key) skips events, after a message
 	snoozes   map[snoozeKey]time.Time // until when someone gets no messages from a hook (/snooze)
 	hookLog   []hookEntry             // the latest hook checks, for /hooks
+	hookStats map[string]*hookStats   // how each hook's events were handled, for /hooks stats
+	boot      time.Time               // when the bot started
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
@@ -110,7 +112,8 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
-		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, cooldowns: map[string]time.Time{}, snoozes: map[snoozeKey]time.Time{}}
+		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, cooldowns: map[string]time.Time{}, snoozes: map[snoozeKey]time.Time{},
+		hookStats: map[string]*hookStats{}, boot: time.Now()}
 }
 
 // Handle is called for every message from the transport. It never blocks on the model.

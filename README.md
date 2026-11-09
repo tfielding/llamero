@@ -57,6 +57,7 @@ Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
 | `/schedules` | Your [scheduled checks](#schedules), with their numbers and next run |
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
+| `/hooks stats` | Totals per hook since the bot started: checked, sent, nothing to report, sent unchecked and why, skipped, check times, and the busiest keys |
 | `/snooze 2h` | Mute every [hook](#hooks) for you for a while (`30m`, `1h30m`, `1d`, up to `7d`); `/snooze <hook> 2h` mutes one, `/snooze <hook> <key> 2h` one hook's events for one key (e.g. a camera) |
 | `/snooze` | What you've snoozed; `/snooze off` (or `/snooze <hook> off`) unmutes |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
@@ -428,6 +429,11 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
 - `/hooks` shows the latest checks and what each decided, including the model's reason for
   "nothing to report", which helps when tuning `task` and `only_if`.
+- `/hooks stats` shows the totals per hook since the bot started: how many checks sent a
+  message and how many found nothing, how often events went out unchecked (and why, e.g. Ollama
+  unreachable), how many were skipped while cooling down or snoozed, typical and slowest check
+  times, and the busiest keys with how many of each were sent. Like `/hooks`, it's kept in
+  memory, so a restart starts it over.
 - `/snooze` mutes hooks for a while, for the person who sends it: during yard work, or when
   guests are expected. `/snooze 2h` mutes them all, `/snooze camera_alert 30m` one, and
   `/snooze camera_alert front_door 1h` only that hook's events sent with that `key`. Muted events

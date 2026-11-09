@@ -25,11 +25,12 @@ type hookEntry struct {
 	took    time.Duration
 }
 
-// logHook remembers how a check (or a skipped event) went.
-func (b *Bot) logHook(hook string, keys []string, event, outcome string, took time.Duration) {
+// logHook remembers how a check (or a skipped event) went, for /hooks and /hooks stats.
+func (b *Bot) logHook(hook string, kind hookOutcome, keys []string, event, outcome string, took time.Duration) {
 	e := hookEntry{at: time.Now(), hook: hook, keys: strings.Join(keys, ", "), event: shorten(oneLine(event), hookLogEvent),
 		outcome: outcome, took: took}
 	b.mu.Lock()
+	b.countHook(hook, kind, keys, strings.TrimPrefix(outcome, "sent unchecked: "), took)
 	b.hookLog = append(b.hookLog, e)
 	if len(b.hookLog) > hookLogSize {
 		b.hookLog = b.hookLog[len(b.hookLog)-hookLogSize:]
@@ -71,9 +72,15 @@ func nothingReason(answer string) string {
 }
 
 // hooksCommand answers /hooks.
-func (b *Bot) hooksCommand() string {
+func (b *Bot) hooksCommand(args []string) string {
 	if len(b.opt.Hooks) == 0 {
 		return "No hooks are set up (webhooks.hooks in config.yml)."
+	}
+	switch {
+	case len(args) == 1 && strings.EqualFold(args[0], "stats"):
+		return b.hookStatsText()
+	case len(args) > 0:
+		return "/hooks shows the latest checks; /hooks stats the totals since the bot started."
 	}
 	b.mu.Lock()
 	log := append([]hookEntry(nil), b.hookLog...)
@@ -97,7 +104,7 @@ func (b *Bot) hooksCommand() string {
 			fmt.Fprintf(&sb, "\n  %s", e.event)
 		}
 	}
-	sb.WriteString("\n\nKept since the bot started, up to 20.")
+	sb.WriteString("\n\nKept since the bot started, up to 20. /hooks stats for the totals.")
 	return sb.String()
 }
 

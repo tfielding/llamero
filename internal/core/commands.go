@@ -62,7 +62,7 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 	case "/knowledge":
 		return b.knowledgeText()
 	case "/hooks":
-		return b.hooksCommand()
+		return b.hooksCommand(args)
 	case "/snooze":
 		return b.snoozeCommand(sender, args)
 	case "/think":
@@ -133,7 +133,7 @@ const helpText = `Commands:
 /stats - speed of the last reply
 /settings - current configuration (secrets hidden)
 /knowledge - notes the bot has from the knowledge folder
-/hooks - the latest hook checks and what each decided
+/hooks - the latest hook checks and what each decided (/hooks stats for totals)
 /snooze - mute hooks for a while (/snooze 2h, /snooze <hook> 30m, /snooze off)
 /schedules - scheduled checks (delete, pause, resume or run with a number)
 /wake - wake the Ollama machine (Wake-on-LAN)

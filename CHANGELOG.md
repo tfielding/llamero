@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `/hooks stats`: totals per hook since the bot started: checked, sent and nothing to report,
+  sent unchecked and why, skipped (cooling down, snoozed), check times, and the busiest keys.
 - `/snooze`: mute hooks for a while, for the person who asks: all of them (`/snooze 2h`), one
   (`/snooze camera_alert 30m`), or one hook's events for one key such as a camera
   (`/snooze camera_alert front_door 1h`). `/snooze` lists them and `/snooze off` ends them.

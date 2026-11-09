@@ -56,12 +56,12 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	b.mu.Unlock()
 	if time.Now().Before(until) {
 		slog.Info("hook event skipped: cooling down", "hook", name, "key", key, "for", time.Until(until).Round(time.Second))
-		b.logHook(name, []string{key}, text, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
+		b.logHook(name, outCooling, []string{key}, text, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
 		return true
 	}
 	if to, left := b.awake(h, map[string]bool{key: true}); len(to) == 0 && left > 0 {
 		slog.Info("hook event skipped: snoozed", "hook", name, "key", key, "for", left.Round(time.Second))
-		b.logHook(name, []string{key}, text, "skipped: snoozed for "+humanDuration(left), 0)
+		b.logHook(name, outSnoozed, []string{key}, text, "skipped: snoozed for "+humanDuration(left), 0)
 		return true
 	}
 	if r := []rune(strings.TrimSpace(text)); len(r) > maxHookEventChars {
@@ -153,7 +153,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	to, left := b.awake(h, run.keys)
 	if len(to) == 0 {
 		slog.Info("hook events skipped: snoozed", "hook", h.Name, "events", len(run.events)+run.dropped)
-		b.logHook(h.Name, runKeys(run), firstEvent(run), "skipped: snoozed for "+humanDuration(left), 0)
+		b.logHook(h.Name, outSnoozed, runKeys(run), firstEvent(run), "skipped: snoozed for "+humanDuration(left), 0)
 		return
 	}
 	start := time.Now()
@@ -161,12 +161,12 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	if h.Task == "" {
 		b.sendHook(ctx, h, run, to, response{text: h.titled("", events, false)})
 		slog.Info("hook events sent on", "hook", h.Name, "events", len(run.events)+run.dropped)
-		b.logHook(h.Name, runKeys(run), firstEvent(run), "sent on unchecked (no task)", 0)
+		b.logHook(h.Name, outForwarded, runKeys(run), firstEvent(run), "sent on unchecked (no task)", 0)
 		return
 	}
 	unchecked := func(why string) {
 		slog.Warn("hook events sent unchecked", "hook", h.Name, "reason", why)
-		b.logHook(h.Name, runKeys(run), firstEvent(run), "sent unchecked: "+why, time.Since(start))
+		b.logHook(h.Name, outUnchecked, runKeys(run), firstEvent(run), "sent unchecked: "+why, time.Since(start))
 		b.sendHook(ctx, h, run, to, response{text: h.titled("not checked: "+why, events, false)})
 	}
 	if err := b.llm.Ping(ctx); err != nil {
@@ -186,7 +186,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	switch {
 	case stopped:
 		slog.Info("hook check stopped", "hook", h.Name)
-		b.logHook(h.Name, runKeys(run), firstEvent(run), "stopped with /stop", time.Since(start))
+		b.logHook(h.Name, outStopped, runKeys(run), firstEvent(run), "stopped with /stop", time.Since(start))
 		return
 	case err != nil && ctx.Err() != nil:
 		return // shutting down
@@ -207,12 +207,12 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		if why := nothingReason(answer); why != "" {
 			outcome += " (" + why + ")"
 		}
-		b.logHook(h.Name, runKeys(run), firstEvent(run), outcome, time.Since(start))
+		b.logHook(h.Name, outNothing, runKeys(run), firstEvent(run), outcome, time.Since(start))
 		return
 	}
 	b.sendHook(ctx, h, run, to, response{text: h.titled("", answer, true), fromModel: true, images: images})
 	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
-	b.logHook(h.Name, runKeys(run), firstEvent(run), "sent", time.Since(start))
+	b.logHook(h.Name, outSent, runKeys(run), firstEvent(run), "sent", time.Since(start))
 	for _, r := range to {
 		b.remember(r, fmt.Sprintf("(Event from %s: %s)", h.Name, strings.ReplaceAll(events, "\n", " ")), answer, len(images))
 	}
