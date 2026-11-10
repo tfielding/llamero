@@ -162,6 +162,15 @@ func TestNoAnswerAfterTools(t *testing.T) {
 	if got := reply(t, m); got != "🔔 door (not checked: the model gave no answer)\n\nperson on front_door" {
 		t.Errorf("hook: %q", got)
 	}
+
+	// Only a note about pictures is no answer either: no title over bare pictures.
+	l.mu.Lock()
+	l.answer = "[2 images were sent to the user with this reply.]"
+	l.mu.Unlock()
+	b.Hook(b.ctx, "door", "door left open", "")
+	if got := reply(t, m); got != "🔔 door (not checked: the model gave no answer)\n\ndoor left open" {
+		t.Errorf("image note only: %q", got)
+	}
 }
 
 func TestHookOnlyIfWithPictures(t *testing.T) {

@@ -35,6 +35,10 @@ All notable changes to this project are documented here. The format follows
   only described past events in words, which didn't help checks tell new pictures apart. Old
   verdicts in `data/learned/` are no longer read and can be deleted.
 
+### Fixed
+- A hook or schedule check whose answer was only a note about pictures sent a title over bare
+  pictures; it now counts as no answer (hook events arrive marked not checked).
+
 ## [0.2.0] - 2026-11-07
 
 ### Added

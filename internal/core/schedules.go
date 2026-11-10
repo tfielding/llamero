@@ -308,6 +308,10 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 	answer, images, stopped, err := b.checkRun(ctx, sender, fmt.Sprintf("running schedule %d", id),
 		scheduledTask(*it, b.specText(it.When)), checkOptions{})
 	done()
+	answer = stripImageNotes(answer)
+	if err == nil && !stopped && answer == "" { // only a note about pictures: that's no answer either
+		err = noAnswer{}
+	}
 	switch {
 	case stopped:
 		slog.Info("scheduled check stopped", "id", id) // by /stop, which already replied
@@ -325,7 +329,6 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		return
 	}
 	b.scheduleWorked(sender, *it)
-	answer = stripImageNotes(answer)
 	if it.OnlyIf != "" && nothing(answer) { // pictures it looked at to decide don't count
 		slog.Info("scheduled check: nothing to report", "id", id, "took", time.Since(start).Round(100*time.Millisecond))
 		return

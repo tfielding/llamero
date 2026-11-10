@@ -187,6 +187,10 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	// Checks don't need the chat: no history, so every model call has less to read.
 	answer, images, stopped, err := b.checkRun(ctx, sender, "checking "+h.Name, hookTask(h, events),
 		checkOptions{model: h.Model, think: h.Think, tools: h.Tools, noHistory: true})
+	answer = stripImageNotes(answer)
+	if err == nil && !stopped && answer == "" { // only a note about pictures: that's no answer either
+		err = noAnswer{}
+	}
 	switch {
 	case stopped:
 		slog.Info("hook check stopped", "hook", h.Name)
@@ -204,7 +208,6 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		unchecked("the model returned an error (" + short(err) + ")")
 		return
 	}
-	answer = stripImageNotes(answer)
 	if h.OnlyIf != "" && nothing(answer) { // pictures it looked at to decide don't count
 		slog.Info("hook check: nothing to report", "hook", h.Name, "took", time.Since(start).Round(100*time.Millisecond))
 		outcome := "nothing to report"
