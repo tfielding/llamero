@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A model could say it had set a reminder without creating a schedule. The schedule tool now tells
+  models it's the only way to do something later, and not to claim a schedule it didn't create.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added

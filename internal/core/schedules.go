@@ -41,7 +41,8 @@ func scheduleTools() []toolbox.Tool {
 			Description: "Set up a check that runs later or repeatedly, with its result sent to the user: e.g. \"every weekday " +
 				"at 7:30 tell me what happened overnight on the cameras\", \"remind me at 5pm to check the porch\", \"every " +
 				"30 minutes after 22:00 tell me if the garage door is open\". Only for things the user asked to be done " +
-				"later or regularly. The user is asked to approve it.",
+				"later or regularly. The user is asked to approve it. Calling this tool is the only way to do something " +
+				"later: never tell the user a reminder, check or schedule is set unless this tool returned success.",
 			Schema: map[string]any{"type": "object", "required": []string{"when", "task"}, "properties": map[string]any{
 				"when": str("when to run, one of these forms: " + schedule.Forms),
 				"task": str("what to check or say, in the user's words, e.g. \"summarize camera alerts since 22:00\""),
