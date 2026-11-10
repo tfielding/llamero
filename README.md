@@ -249,6 +249,7 @@ Settings come from an optional config file, environment variables, or both.
 | `MCP_ALLOW_WRITE` | `mcp.allow_write` | `false` | Tools that can change things: `false` hides them, `ask` asks you before each call, `true` runs them. The default for servers without their own |
 | | `mcp.servers.<name>.allow_write` | `mcp.allow_write` | The same, for one server |
 | | `mcp.servers.<name>.tools` | all | Only these of the server's tools |
+| | `mcp.servers.<name>.read_only` | none | Tools to treat as read-only although the server doesn't mark them: offered without asking, and given to hooks and schedules. Only list tools that really just look things up |
 | | `mcp.servers.<name>.knowledge` | `<name>.md` if present | The server's notes file in the [knowledge folder](#knowledge); must exist |
 | `MCP_TOOLS` | `mcp.tools` | all | Only these tools, across all servers |
 | `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
@@ -298,6 +299,9 @@ tool-specific code: list a server and its tools are offered to the model.
 
 - Only tools marked **read-only** are offered, unless the server's `allow_write` is `ask` or
   `true`. Anything that can change things (locks, alarms, settings) stays hidden by default.
+  Hooks and schedules only ever get read-only tools. If a server doesn't mark a tool that only
+  looks things up (Home Assistant's `GetLiveContext`, for one), vouch for it with the server's
+  `read_only: [GetLiveContext]`.
 - Tools are only offered to models that support tool calling (Ollama reports this per model).
 - Pictures a tool returns are sent to you with the reply. A vision model sees still ones (JPEG,
   PNG) too; clips such as frigate-mcp's animated GIFs are only for you, and the model is told one

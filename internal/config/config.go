@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -534,6 +536,14 @@ func (s settings) servers(def toolbox.Write) ([]toolbox.Server, error) {
 				srv.Tools[t] = true
 			}
 		}
+		for _, t := range fs.ReadOnly {
+			if t = strings.TrimSpace(t); t != "" {
+				if srv.ReadOnly == nil {
+					srv.ReadOnly = map[string]bool{}
+				}
+				srv.ReadOnly[t] = true
+			}
+		}
 		out = append(out, srv)
 	}
 	return out, nil
@@ -639,6 +649,9 @@ func (c Config) Describe() string {
 			}
 			sort.Strings(names)
 			extra = append(extra, "tools "+strings.Join(names, " "))
+		}
+		if len(s.ReadOnly) > 0 {
+			extra = append(extra, "read_only "+strings.Join(slices.Sorted(maps.Keys(s.ReadOnly)), " "))
 		}
 		v := s.Name + "=" + safeURL(s.URL)
 		if len(extra) > 0 {

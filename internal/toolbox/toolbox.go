@@ -34,6 +34,9 @@ type Server struct {
 	Token string          // optional bearer token
 	Write Write           // what to do with its tools that aren't marked read-only
 	Tools map[string]bool // if non-empty, only these of its tools (names as the server gives them)
+	// ReadOnly is its tools to treat as read-only although the server doesn't mark them (names as
+	// the server gives them): they're offered without asking, and hooks and schedules get them.
+	ReadOnly map[string]bool
 	// Knowledge is the file in the knowledge folder with notes for its tools; empty = <Name>.md if it exists.
 	Knowledge string
 }
@@ -473,7 +476,7 @@ func (b *Box) list(ctx context.Context, s Server) ([]Tool, error) {
 			if err != nil {
 				return err
 			}
-			ro := t.Annotations != nil && t.Annotations.ReadOnlyHint
+			ro := t.Annotations != nil && t.Annotations.ReadOnlyHint || s.ReadOnly[t.Name]
 			tools = append(tools, Tool{
 				Name: t.Name, Description: t.Description, Schema: t.InputSchema,
 				ReadOnly: ro, server: s.Name, remote: t.Name,

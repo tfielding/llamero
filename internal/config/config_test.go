@@ -217,6 +217,7 @@ mcp:
       token: ${HA_TOKEN}
       allow_write: ask
       tools: [GetLiveContext, HassTurnOn, HassTurnOff]
+      read_only: [GetLiveContext]
 `
 
 func TestConfigFile(t *testing.T) {
@@ -240,11 +241,11 @@ func TestConfigFile(t *testing.T) {
 	if fr.Name != "frigate" || fr.Write != toolbox.WriteOff || fr.Token != "" || len(fr.Tools) != 0 {
 		t.Errorf("frigate: %+v", fr)
 	}
-	if ha.Name != "ha" || ha.Write != toolbox.WriteAsk || ha.Token != "tok: with $pecial chars" || !ha.Tools["HassTurnOff"] || len(ha.Tools) != 3 {
+	if ha.Name != "ha" || ha.Write != toolbox.WriteAsk || ha.Token != "tok: with $pecial chars" || !ha.Tools["HassTurnOff"] || len(ha.Tools) != 3 || !ha.ReadOnly["GetLiveContext"] || len(ha.ReadOnly) != 1 {
 		t.Errorf("ha: %+v", ha)
 	}
 	d := c.Describe()
-	for _, want := range []string{"CONFIG_FILE: " + path, "MCP_SERVERS: ha=http://homeassistant:8123/api/mcp (token set, allow_write ask, tools GetLiveContext HassTurnOff HassTurnOn)",
+	for _, want := range []string{"CONFIG_FILE: " + path, "MCP_SERVERS: ha=http://homeassistant:8123/api/mcp (token set, allow_write ask, tools GetLiveContext HassTurnOff HassTurnOn, read_only GetLiveContext)",
 		"MCP_SERVERS: frigate=http://frigate-mcp:8091/mcp\n", "OLLAMA_MODEL: llama3.2:latest\n"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("describe lacks %q:\n%s", want, d)

@@ -71,3 +71,4 @@ mcp:
       allow_write: ask                  # this server's tools that change things wait for your OK
       knowledge: ha.md                  # must exist; without this line, ha.md is used if it's there
       # tools: [GetLiveContext, HassTurnOn, HassTurnOff]   # only these of its tools
+      # read_only: [GetLiveContext]    # treat as read-only though the server doesn't mark it (hooks get it)

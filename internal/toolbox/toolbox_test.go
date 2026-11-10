@@ -332,6 +332,7 @@ func TestPerServerWriteAndTools(t *testing.T) {
 		{Name: "off", URL: mixedServer(t, "off").URL, Write: WriteOff},
 		{Name: "ask", URL: mixedServer(t, "ask").URL, Write: WriteAsk, Tools: map[string]bool{"ask_look": true, "ask_act": true}},
 		{Name: "on", URL: mixedServer(t, "on").URL, Write: WriteOn},
+		{Name: "vouch", URL: mixedServer(t, "vouch").URL, Write: WriteAsk, ReadOnly: map[string]bool{"vouch_act": true}},
 	}, Options{})
 	defer box.Close()
 	got := map[string]Tool{}
@@ -342,6 +343,7 @@ func TestPerServerWriteAndTools(t *testing.T) {
 		"off_look": false, "off_extra": false,
 		"ask_look": false, "ask_act": true,
 		"on_look": false, "on_act": false, "on_extra": false,
+		"vouch_look": false, "vouch_act": false, "vouch_extra": false, // listed as read-only: no approval
 	}
 	if len(got) != len(want) {
 		t.Fatalf("tools: %v", got)
@@ -350,6 +352,9 @@ func TestPerServerWriteAndTools(t *testing.T) {
 		if tl, ok := got[name]; !ok || tl.Confirm != confirm {
 			t.Errorf("%s: present %v, confirm %v (want %v)", name, ok, tl.Confirm, confirm)
 		}
+	}
+	if !got["vouch_act"].ReadOnly || got["ask_act"].ReadOnly {
+		t.Error("read_only list not applied")
 	}
 }
 

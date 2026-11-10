@@ -96,6 +96,7 @@ type fileServer struct {
 	Token      string     `yaml:"token"`
 	AllowWrite string     `yaml:"allow_write"`
 	Tools      stringList `yaml:"tools"`
+	ReadOnly   stringList `yaml:"read_only"`
 	Knowledge  string     `yaml:"knowledge"`
 }
 
