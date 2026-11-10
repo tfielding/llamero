@@ -8,7 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -377,19 +378,19 @@ func (b *Bot) checkRun(ctx context.Context, sender, task, content string, opt ch
 		for _, name := range opt.tools {
 			want[name] = true
 		}
-		for _, t := range b.opt.Tools.Tools(ctx) {
+		all := b.opt.Tools.Tools(ctx)
+		for _, t := range all {
 			if t.ReadOnly && (len(want) == 0 || want[t.Name]) {
 				tools = append(tools, t)
 				delete(want, t.Name)
 			}
 		}
 		if len(want) > 0 {
-			missing := make([]string, 0, len(want))
-			for name := range want {
-				missing = append(missing, name)
-			}
-			sort.Strings(missing)
-			slog.Warn("check: tools not available (unknown, not read-only, or their server is down)", "task", task, "tools", missing)
+			missing := slices.Sorted(maps.Keys(want))
+			slog.Warn("check: tools not available", "task", task, "tools", strings.Join(toolProblems(all, missing), "; "))
+			// Told, the model works without them instead of guessing other names to call.
+			content += fmt.Sprintf("\n\n(Not available right now: %s. Don't try to call them or other names "+
+				"for them; do what you can with the tools you have.)", strings.Join(missing, ", "))
 		}
 	}
 	if opt.noHistory {

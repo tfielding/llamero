@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -150,6 +151,7 @@ func (b *Box) Tools(ctx context.Context) []Tool {
 			errs[s.Name] = err
 			continue
 		}
+		b.checkReadOnly(s, ts)
 		all = append(all, ts...)
 	}
 	all = b.filter(dedupe(all))
@@ -580,6 +582,83 @@ func (b *Box) filter(tools []Tool) []Tool {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// checkReadOnly logs, once each, names in s's read_only list that s doesn't have: a misspelled
+// name would otherwise leave the tool out of hooks and schedules without a word.
+func (b *Box) checkReadOnly(s Server, ts []Tool) {
+	if len(s.ReadOnly) == 0 {
+		return
+	}
+	have := map[string]bool{}
+	names := make([]string, len(ts))
+	for i, t := range ts {
+		have[t.remote] = true
+		names[i] = t.remote
+	}
+	for _, name := range slices.Sorted(maps.Keys(s.ReadOnly)) {
+		if have[name] {
+			continue
+		}
+		key := "read_only/" + s.Name + "/" + name
+		b.mu.Lock()
+		first := !b.hidden[key]
+		b.hidden[key] = true
+		b.mu.Unlock()
+		if !first {
+			continue
+		}
+		args := []any{"server", s.Name, "tool", name}
+		if alt := Suggest(name, names); alt != "" {
+			args = append(args, "did_you_mean", alt)
+		}
+		slog.Warn("read_only lists a tool the server doesn't have", args...)
+	}
+}
+
+// Suggest is the name in names that name was probably meant to be: the same but for case, the
+// same with a prefix (servers like name__ or server_ prefixes), or one or two typos away. ""
+// if none is close.
+func Suggest(name string, names []string) string {
+	sorted := slices.Sorted(slices.Values(names))
+	want := strings.ToLower(name)
+	for _, n := range sorted {
+		if l := strings.ToLower(n); l == want || strings.HasSuffix(l, "_"+want) {
+			return n
+		}
+	}
+	if len([]rune(want)) < 5 { // short names are too close to everything
+		return ""
+	}
+	best, bestDist := "", 3
+	for _, n := range sorted {
+		if d := editDistance(want, strings.ToLower(n)); d < bestDist {
+			best, bestDist = n, d
+		}
+	}
+	return best
+}
+
+// editDistance is the number of single-character edits from a to b (Levenshtein).
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := range ra {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i + 1
+		for j := range rb {
+			cost := 1
+			if ra[i] == rb[j] {
+				cost = 0
+			}
+			cur[j+1] = min(prev[j+1]+1, cur[j]+1, prev[j]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
 }
 
 // dedupe prefixes tool names with their server name when two servers use the same name.

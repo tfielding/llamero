@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tfielding/llamero/internal/toolbox"
 )
 
 // Hook is one configured hook.
@@ -274,4 +277,55 @@ func hookTask(h Hook, events string) string {
 	}
 	sb.WriteString("You can only look things up here, not take actions. Keep the answer short: it's sent to the user's phone.")
 	return sb.String()
+}
+
+// CheckHookTools logs, at startup, each hook's tools its checks can't use, with the reason, so a
+// misspelled name or a tool that needs approval doesn't only show up when an event arrives.
+func (b *Bot) CheckHookTools(ctx context.Context) {
+	if b.opt.Tools == nil {
+		return
+	}
+	all := b.opt.Tools.Tools(ctx)
+	usable := map[string]bool{}
+	for _, t := range all {
+		usable[t.Name] = t.ReadOnly
+	}
+	for _, name := range slices.Sorted(maps.Keys(b.opt.Hooks)) {
+		var missing []string
+		for _, t := range b.opt.Hooks[name].Tools {
+			if !usable[t] {
+				missing = append(missing, t)
+			}
+		}
+		if len(missing) > 0 {
+			slog.Warn("hook lists tools its checks can't use", "hook", name, "tools", strings.Join(toolProblems(all, missing), "; "))
+		}
+	}
+}
+
+// toolProblems says why each of names isn't among the tools a check can use: it needs approval,
+// it's probably a different name, or it's unknown (or its server is down).
+func toolProblems(all []toolbox.Tool, names []string) []string {
+	byName := map[string]toolbox.Tool{}
+	known := make([]string, 0, len(all))
+	for _, t := range all {
+		byName[t.Name] = t
+		known = append(known, t.Name)
+	}
+	out := make([]string, len(names))
+	for i, n := range names {
+		switch t, ok := byName[n]; {
+		case ok && !t.ReadOnly:
+			out[i] = n + " (not read-only, so checks can't use it; if it only looks things up, add it to its server's read_only)"
+		case ok:
+			out[i] = n
+		default:
+			if alt := toolbox.Suggest(n, known); alt != "" {
+				out[i] = n + " (no such tool; did you mean " + alt + "?)"
+			} else {
+				out[i] = n + " (no such tool, its server is down, or allow_write: false hides it)"
+			}
+		}
+	}
+	return out
 }

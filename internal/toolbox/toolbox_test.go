@@ -332,7 +332,7 @@ func TestPerServerWriteAndTools(t *testing.T) {
 		{Name: "off", URL: mixedServer(t, "off").URL, Write: WriteOff},
 		{Name: "ask", URL: mixedServer(t, "ask").URL, Write: WriteAsk, Tools: map[string]bool{"ask_look": true, "ask_act": true}},
 		{Name: "on", URL: mixedServer(t, "on").URL, Write: WriteOn},
-		{Name: "vouch", URL: mixedServer(t, "vouch").URL, Write: WriteAsk, ReadOnly: map[string]bool{"vouch_act": true}},
+		{Name: "vouch", URL: mixedServer(t, "vouch").URL, Write: WriteAsk, ReadOnly: map[string]bool{"vouch_act": true, "vouch_typo": true}},
 	}, Options{})
 	defer box.Close()
 	got := map[string]Tool{}
@@ -366,5 +366,26 @@ func TestParseWrite(t *testing.T) {
 	}
 	if _, err := ParseWrite("maybe"); err == nil || !strings.Contains(err.Error(), "want false, ask or true") {
 		t.Errorf("maybe: %v", err)
+	}
+}
+
+func TestSuggest(t *testing.T) {
+	names := []string{"get_state", "home__GetLiveContext", "srv_look", "list_cameras"}
+	for in, want := range map[string]string{
+		"GetLiveContext": "home__GetLiveContext", // a prefix the server adds
+		"getlivecontext": "home__GetLiveContext",
+		"look":           "srv_look", // the prefix for clashing names
+		"GET_STATE":      "get_state",
+		"get_stat":       "get_state", // a typo
+		"list_camera":    "list_cameras",
+		"lst":            "", // too short to guess
+		"turn_off":       "", // nothing close
+	} {
+		if got := Suggest(in, names); got != want {
+			t.Errorf("Suggest(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := editDistance("kitten", "sitting"); got != 3 {
+		t.Errorf("editDistance = %d", got)
 	}
 }

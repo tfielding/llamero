@@ -8,7 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - `mcp.servers.<name>.read_only`: tools to treat as read-only although their server doesn't mark
-  them, so hooks and schedules get them (e.g. Home Assistant's `GetLiveContext`).
+  them, so hooks and schedules get them (e.g. Home Assistant's `homeassistant__GetLiveContext`).
+- Tool names that don't match: at startup, names in a server's `read_only` it doesn't have, and
+  hook `tools` checks can't use, are logged with the reason (needs approval, or a close match
+  such as a prefixed name).
+- A hook check whose listed tools aren't available is told which, so the model works without
+  them instead of guessing other tool names.
 - Hooks can send to group chats: put a Signal group (`signal:group.<id>`) or a Telegram group
   (`telegram:-<id>`) in a hook's `to`, alone or with people. Groups only receive messages; the
   bot still only chats one to one, and logs a group's id (once) when it ignores a message there.

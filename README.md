@@ -300,8 +300,10 @@ tool-specific code: list a server and its tools are offered to the model.
 - Only tools marked **read-only** are offered, unless the server's `allow_write` is `ask` or
   `true`. Anything that can change things (locks, alarms, settings) stays hidden by default.
   Hooks and schedules only ever get read-only tools. If a server doesn't mark a tool that only
-  looks things up (Home Assistant's `GetLiveContext`, for one), vouch for it with the server's
-  `read_only: [GetLiveContext]`.
+  looks things up, vouch for it with the server's `read_only`, using the name `/status` lists
+  (newer Home Assistant versions prefix theirs: `read_only: [homeassistant__GetLiveContext]`).
+  Names in `read_only` or a hook's `tools` that don't match a usable tool are logged at startup,
+  with a close match if there is one, and a check is told which of its tools are missing.
 - Tools are only offered to models that support tool calling (Ollama reports this per model).
 - Pictures a tool returns are sent to you with the reply. A vision model sees still ones (JPEG,
   PNG) too; clips such as frigate-mcp's animated GIFs are only for you, and the model is told one

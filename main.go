@@ -163,6 +163,7 @@ func run() error {
 		Reaction:     cfg.Reaction,
 	})
 	ready.Store(b)
+	b.CheckHookTools(ctx)
 
 	slog.Info("starting", "version", version, "config_file", cfg.ConfigFile, "schedules", cfg.Schedules, "tz", time.Local.String(), "transports", len(listeners), "ollama", cfg.OllamaURL, "model", cfg.DefaultModel, "allowed", len(cfg.Allowed()), "summaries", cfg.Summarize, "wake_on_lan", cfg.WakeMAC != nil, "hooks", len(cfg.Hooks))
 	b.StartScheduler(ctx)

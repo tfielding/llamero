@@ -2,6 +2,7 @@ package core
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -402,5 +403,36 @@ func TestHookToGroups(t *testing.T) {
 	m2.mu.Unlock()
 	if !strings.HasPrefix(sent, group+": ") {
 		t.Errorf("sent %q, want it only to the group", sent)
+	}
+}
+
+func TestHookMissingTools(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check.", Tools: []string{"get_state", "turn_off", "getstate"}})
+	l.answer = "All quiet."
+	b.CheckHookTools(b.ctx) // only logs
+	b.Hook(b.ctx, "door", "door left open", "")
+	reply(t, m)
+	l.mu.Lock()
+	offered, last := l.offered, l.last[len(l.last)-1].Content
+	l.mu.Unlock()
+	if strings.Join(offered, ",") != "get_state" {
+		t.Errorf("offered %v", offered)
+	}
+	if !strings.Contains(last, "(Not available right now: getstate, turn_off. Don't try to call them") {
+		t.Errorf("the check isn't told what's missing:\n%s", last)
+	}
+}
+
+func TestToolProblems(t *testing.T) {
+	all := []toolbox.Tool{{Name: "get_state", ReadOnly: true}, {Name: "turn_off"}, {Name: "home__GetLiveContext", ReadOnly: true}}
+	got := toolProblems(all, []string{"turn_off", "getstate", "GetLiveContext", "nope"})
+	want := []string{
+		"turn_off (not read-only, so checks can't use it; if it only looks things up, add it to its server's read_only)",
+		"getstate (no such tool; did you mean get_state?)",
+		"GetLiveContext (no such tool; did you mean home__GetLiveContext?)",
+		"nope (no such tool, its server is down, or allow_write: false hides it)",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got:\n%s", strings.Join(got, "\n"))
 	}
 }
