@@ -34,7 +34,7 @@ type Config struct {
 	Signal           Signal   // transports.signal; see Signal.On
 	Telegram         Telegram // transports.telegram; see Telegram.On
 	OllamaURL        string   // e.g. http://192.168.1.50:11434
-	OllamaBackupURL  string   // tried when OllamaURL can't be reached, e.g. the same machine over a VPN; empty = none
+	OllamaBackupURL  string   // a backup server, tried when OllamaURL can't be reached; empty = none
 	DefaultModel     string   // empty = first model Ollama reports
 	VisionModel      string   // answers messages with photos when the chat's model can't see; empty = none
 	DefaultModelAuto bool     // no model was set: main picks the first installed one

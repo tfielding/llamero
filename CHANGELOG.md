@@ -26,9 +26,8 @@ All notable changes to this project are documented here. The format follows
   (`/snooze camera_alert front_door 1h`). `/snooze` lists them and `/snooze off` ends them.
 - Hook `title`: the first line of a hook's messages, e.g. `📷 Camera` instead of "🔔 camera_alert",
   or `none` for no title line.
-- `ollama.backup_url` (`OLLAMA_BACKUP_URL`): another address for Ollama, used when the main one
-  can't be reached, e.g. a laptop's VPN address while it's away from home. The main address is
-  tried first again after a minute.
+- `ollama.backup_url` (`OLLAMA_BACKUP_URL`): a backup Ollama server, used when the main one can't
+  be reached. The main server is tried first again after a minute.
 
 ### Changed
 - An Ollama address that doesn't answer now fails after 3 seconds instead of waiting for the

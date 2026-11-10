@@ -45,7 +45,7 @@ type ToolCall struct {
 }
 
 type Client struct {
-	bases []string // the server, then backups (e.g. the same machine over a VPN)
+	bases []string // the main server, then backups
 	http  *http.Client
 
 	mu     sync.Mutex
@@ -59,7 +59,7 @@ const (
 )
 
 // New returns a client for the Ollama server at baseURL. Requests that can't connect to it go to
-// the backups in order, e.g. the same machine at another address.
+// the backups in order.
 func New(baseURL string, timeout time.Duration, backups ...string) *Client {
 	dialer := &net.Dialer{Timeout: dialTimeout}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
