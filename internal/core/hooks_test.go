@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -434,5 +435,84 @@ func TestToolProblems(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("got:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+// replies collects n messages, in whatever order they arrive: a command's reply and the run it
+// queued can race.
+func replies(t *testing.T, m *fakeMsg, n int) []string {
+	t.Helper()
+	out := make([]string, n)
+	for i := range out {
+		out[i] = reply(t, m)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestHooksRetry(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", Cooldown: time.Hour})
+	b.opt.Location = time.UTC
+	l.pingErr = errors.New("connection refused")
+	b.Hook(b.ctx, "door", "person on front_door", "front_door")
+	if got := reply(t, m); got != "🔔 door (not checked: Ollama is unreachable)\n\nperson on front_door" {
+		t.Fatalf("got %q", got)
+	}
+	b.Handle(dm(me, "/hooks"))
+	if got := reply(t, m); !strings.Contains(got, "\n1 run went out unchecked: /hooks retry checks it now.") {
+		t.Fatalf("/hooks:\n%s", got)
+	}
+	b.mu.Lock()
+	at := b.clock(b.missed[0].run.missedAt)
+	cooling := b.cooldowns["door\x00front_door"] // from the unchecked message
+	b.mu.Unlock()
+
+	// Still down: it stays on the list, and the one who asked hears so.
+	b.Handle(dm(me, "/hooks retry"))
+	got := replies(t, m, 2)
+	if !strings.HasPrefix(got[0], "Checking 1 missed hook run again, oldest first:\n\n"+at+" door [front_door]: Ollama is unreachable") ||
+		got[1] != "door (events from "+at+"): still couldn't check: Ollama is unreachable. /hooks retry tries again." {
+		t.Fatalf("retry while down: %q", got)
+	}
+
+	// Back up: checked and sent like any check, marked as late. The old events don't start a
+	// new cooldown, which would hold back new ones.
+	l.mu.Lock()
+	l.pingErr, l.answer = nil, "Someone left a parcel."
+	l.mu.Unlock()
+	b.Handle(dm(me, "/hooks retry"))
+	got = replies(t, m, 2)
+	if !strings.HasPrefix(got[0], "Checking 1 missed hook run again") ||
+		got[1] != "🔔 **door** (rechecked, events from "+at+")\n\nSomeone left a parcel." {
+		t.Fatalf("retry when up: %q", got)
+	}
+	b.mu.Lock()
+	after := b.cooldowns["door\x00front_door"]
+	b.mu.Unlock()
+	if !after.Equal(cooling) {
+		t.Errorf("the recheck moved the cooldown from %v to %v", cooling, after)
+	}
+	b.Handle(dm(me, "/hooks retry"))
+	if got := reply(t, m); !strings.HasPrefix(got, "No missed hook checks to retry.") {
+		t.Fatalf("nothing left: %q", got)
+	}
+	b.Handle(dm(me, "/hooks"))
+	if got := reply(t, m); !strings.Contains(got, "door [front_door]: rechecked: sent") || strings.Contains(got, "went out unchecked:") {
+		t.Fatalf("/hooks after the retry:\n%s", got)
+	}
+}
+
+func TestHooksRetryNothingToReport(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "someone is at the door"})
+	l.pingErr = errors.New("connection refused")
+	b.Hook(b.ctx, "door", "motion on front_door", "")
+	reply(t, m)
+	l.mu.Lock()
+	l.pingErr, l.answer = nil, nothingToReport+" Just the wind."
+	l.mu.Unlock()
+	b.Handle(dm(me, "/hooks retry"))
+	got := replies(t, m, 2)
+	if !strings.HasPrefix(got[1], "door (events from ") || !strings.HasSuffix(got[1], "): nothing to report (Just the wind)") {
+		t.Fatalf("got %q", got)
 	}
 }

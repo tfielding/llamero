@@ -44,7 +44,21 @@ type hookRun struct {
 	events  []string
 	dropped int             // events past maxHookEvents
 	keys    map[string]bool // the events' keys (e.g. a camera), for the cooldown; "" = no key
+
+	// A recheck (/hooks retry) of events that first went out unchecked: when they did, and who
+	// asked. Zero for a run of new events.
+	missedAt  time.Time
+	requester string
 }
+
+// missedRun is a run whose events went out unchecked, kept so /hooks retry can check them.
+type missedRun struct {
+	run *hookRun
+	why string
+}
+
+// maxMissed is how many unchecked runs are kept for /hooks retry; older ones are dropped.
+const maxMissed = 20
 
 // Hook takes an event for the hook called name, and reports false if there's no such hook. The
 // event is handled after the hook's grouping window, together with any others that arrive in it,
@@ -158,9 +172,15 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	// Someone may have snoozed the hook while the events were being grouped. Groups can't snooze.
 	people, left := b.awake(h, run.keys)
 	to := slices.Concat(people, h.Groups)
+	recheck := !run.missedAt.IsZero()
+	prefix := ""
+	if recheck {
+		prefix = "rechecked: "
+	}
 	if len(to) == 0 {
 		slog.Info("hook events skipped: snoozed", "hook", h.Name, "events", len(run.events)+run.dropped)
-		b.logHook(h.Name, outSnoozed, runKeys(run), firstEvent(run), "skipped: snoozed for "+humanDuration(left), 0)
+		b.logHook(h.Name, outSnoozed, runKeys(run), firstEvent(run), prefix+"skipped: snoozed for "+humanDuration(left), 0)
+		b.tellRequester(ctx, run, "skipped, snoozed for "+humanDuration(left))
 		return
 	}
 	start := time.Now()
@@ -172,9 +192,18 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		return
 	}
 	unchecked := func(why string) {
+		if recheck { // they were sent unchecked already: keep them for another try instead
+			slog.Warn("hook recheck failed", "hook", h.Name, "reason", why)
+			b.logHook(h.Name, outUnchecked, runKeys(run), firstEvent(run), "recheck failed: "+why, time.Since(start))
+			b.addMissed(run, why)
+			b.tellRequester(ctx, run, "still couldn't check: "+why+". /hooks retry tries again.")
+			return
+		}
 		slog.Warn("hook events sent unchecked", "hook", h.Name, "reason", why)
 		b.logHook(h.Name, outUnchecked, runKeys(run), firstEvent(run), "sent unchecked: "+why, time.Since(start))
 		b.sendHook(ctx, h, run, to, response{text: h.titled("not checked: "+why, events, false)})
+		run.missedAt = time.Now()
+		b.addMissed(run, why)
 	}
 	if err := b.llm.Ping(ctx); err != nil {
 		switch {
@@ -197,7 +226,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	switch {
 	case stopped:
 		slog.Info("hook check stopped", "hook", h.Name)
-		b.logHook(h.Name, outStopped, runKeys(run), firstEvent(run), "stopped with /stop", time.Since(start))
+		b.logHook(h.Name, outStopped, runKeys(run), firstEvent(run), prefix+"stopped with /stop", time.Since(start))
 		return
 	case err != nil && ctx.Err() != nil:
 		return // shutting down
@@ -217,20 +246,29 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		if why := nothingReason(answer); why != "" {
 			outcome += " (" + why + ")"
 		}
-		b.logHook(h.Name, outNothing, runKeys(run), firstEvent(run), outcome, time.Since(start))
+		b.logHook(h.Name, outNothing, runKeys(run), firstEvent(run), prefix+outcome, time.Since(start))
+		b.tellRequester(ctx, run, outcome)
 		return
 	}
-	b.sendHook(ctx, h, run, to, response{text: h.titled("", answer, true), fromModel: true, images: images})
-	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
-	b.logHook(h.Name, outSent, runKeys(run), firstEvent(run), "sent", time.Since(start))
+	note := ""
+	if recheck {
+		note = "rechecked, events from " + b.clock(run.missedAt)
+	}
+	b.sendHook(ctx, h, run, to, response{text: h.titled(note, answer, true), fromModel: true, images: images})
+	slog.Info("hook check sent", "hook", h.Name, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond), "recheck", recheck)
+	b.logHook(h.Name, outSent, runKeys(run), firstEvent(run), prefix+"sent", time.Since(start))
+	if recheck && !slices.Contains(to, run.requester) {
+		b.tellRequester(ctx, run, "sent")
+	}
 	for _, r := range people { // groups can't follow up, so they have no conversation to add to
 		b.remember(r, fmt.Sprintf("(Event from %s: %s)", h.Name, strings.ReplaceAll(events, "\n", " ")), answer, len(images))
 	}
 }
 
 // sendHook sends a hook's message, and starts its cooldown for the keys of the events in it.
+// A recheck doesn't: its events are old, and new ones for the same keys shouldn't be held back.
 func (b *Bot) sendHook(ctx context.Context, h Hook, run *hookRun, to []string, r response) {
-	if h.Cooldown > 0 {
+	if h.Cooldown > 0 && run.missedAt.IsZero() {
 		until := time.Now().Add(h.Cooldown)
 		b.mu.Lock()
 		for k, t := range b.cooldowns {
@@ -328,4 +366,65 @@ func toolProblems(all []toolbox.Tool, names []string) []string {
 		}
 	}
 	return out
+}
+
+// addMissed keeps a run whose events went out unchecked, for /hooks retry.
+func (b *Bot) addMissed(run *hookRun, why string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.missed = append(b.missed, missedRun{run: run, why: why})
+	if len(b.missed) > maxMissed {
+		b.missed = b.missed[len(b.missed)-maxMissed:]
+	}
+}
+
+// missedCount is how many unchecked runs /hooks retry would check.
+func (b *Bot) missedCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.missed)
+}
+
+// retryHooks answers /hooks retry: the runs that went out unchecked are checked again, in
+// sender's queue and with their chat model. What a check finds goes to the hook's people as
+// usual; sender hears about the ones with nothing to send.
+func (b *Bot) retryHooks(ctx context.Context, sender string) string {
+	b.mu.Lock()
+	runs := b.missed
+	b.missed = nil
+	b.mu.Unlock()
+	if len(runs) == 0 {
+		return "No missed hook checks to retry. Events that go out unchecked (Ollama down, or the model failed) can be checked again here."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Checking %s again, oldest first:\n", plural(len(runs), "missed hook run"))
+	for _, m := range runs {
+		_, known := b.opt.Hooks[m.run.name]
+		if !known { // no longer in the config
+			continue
+		}
+		m.run.requester = sender
+		if !b.enqueue(ctx, sender, message{hook: m.run}) {
+			b.addMissed(m.run, m.why)
+			continue
+		}
+		fmt.Fprintf(&sb, "\n%s %s", b.clock(m.run.missedAt), m.run.name)
+		if keys := runKeys(m.run); len(keys) > 0 {
+			fmt.Fprintf(&sb, " [%s]", strings.Join(keys, ", "))
+		}
+		fmt.Fprintf(&sb, ": %s", m.why)
+	}
+	return sb.String()
+}
+
+// tellRequester tells whoever asked for a recheck how it went, when the hook's own message
+// won't reach them.
+func (b *Bot) tellRequester(ctx context.Context, run *hookRun, outcome string) {
+	if run.requester == "" {
+		return
+	}
+	text := fmt.Sprintf("%s (events from %s): %s", run.name, b.clock(run.missedAt), outcome)
+	if err := b.send(ctx, run.requester, response{text: text}); err != nil {
+		slog.Error("send failed", "to", mask(run.requester), "err", err)
+	}
 }

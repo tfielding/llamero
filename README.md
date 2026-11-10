@@ -58,6 +58,7 @@ Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
 | `/hooks stats` | Totals per hook since the bot started: checked, sent, nothing to report, sent unchecked and why, skipped, check times, and the busiest keys |
+| `/hooks retry` | Check again the hook events that went out unchecked (Ollama down, or the model failed) |
 | `/snooze 2h` | Mute every [hook](#hooks) for you for a while (`30m`, `1h30m`, `1d`, up to `7d`); `/snooze <hook> 2h` mutes one, `/snooze <hook> <key> 2h` one hook's events for one key (e.g. a camera) |
 | `/snooze` | What you've snoozed; `/snooze off` (or `/snooze <hook> off`) unmutes |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
@@ -446,7 +447,7 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   Default: 🔔 and the hook's name. `none` leaves it out, so a message is just the answer.
 - **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
   it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
-  than nothing.
+  than nothing. Once Ollama is back, `/hooks retry` checks them (see below).
 - Hooks are served on the health port, `HEALTH_ADDR` (default 8092). Publish it, or put the caller
   on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
   **503** still starting up.
@@ -458,6 +459,12 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   unreachable), how many were skipped while cooling down or snoozed, typical and slowest check
   times, and the busiest keys with how many of each were sent. Like `/hooks`, it's kept in
   memory, so a restart starts it over.
+- `/hooks retry` checks the events that went out unchecked, once Ollama is back: the last 20
+  such runs since the bot started, with their full event text. A check that finds something is
+  sent as usual, marked "rechecked, events from 10:42"; you're told about the ones with nothing to
+  report, and any that still can't be checked stay for another try. Pictures the tools fetch are
+  from now, not from when the events happened. A recheck doesn't start a cooldown. `/hooks` says
+  when some are waiting.
 - `/snooze` mutes hooks for a while, for the person who sends it: during yard work, or when
   guests are expected. `/snooze 2h` mutes them all, `/snooze camera_alert 30m` one, and
   `/snooze camera_alert front_door 1h` only that hook's events sent with that `key`. Muted events

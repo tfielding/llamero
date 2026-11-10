@@ -74,6 +74,7 @@ type Bot struct {
 	cooldowns map[string]time.Time    // until when each hook (and key) skips events, after a message
 	snoozes   map[snoozeKey]time.Time // until when someone gets no messages from a hook (/snooze)
 	hookLog   []hookEntry             // the latest hook checks, for /hooks
+	missed    []missedRun             // runs whose events went out unchecked, for /hooks retry
 	hookStats map[string]*hookStats   // how each hook's events were handled, for /hooks stats
 	boot      time.Time               // when the bot started
 	approvals map[string]chan string  // sender's answer to a pending tool approval

@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `/hooks retry`: check again the hook events that went out unchecked because Ollama was down or
+  the model failed (the last 20 runs since the bot started). Findings are sent as usual, marked
+  "rechecked"; the one who asked hears about the rest. `/hooks` says when some are waiting.
 - The model is told the current date and time with every message, chats and checks alike, so
   questions about "yesterday" or "this week" don't spend a tool call on the time.
 - Names in a server's `tools` that it doesn't have are logged at startup, with a close match

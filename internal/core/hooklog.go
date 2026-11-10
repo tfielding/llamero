@@ -4,6 +4,7 @@ package core
 // memory only.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -72,15 +73,17 @@ func nothingReason(answer string) string {
 }
 
 // hooksCommand answers /hooks.
-func (b *Bot) hooksCommand(args []string) string {
+func (b *Bot) hooksCommand(ctx context.Context, sender string, args []string) string {
 	if len(b.opt.Hooks) == 0 {
 		return "No hooks are set up (webhooks.hooks in config.yml)."
 	}
 	switch {
 	case len(args) == 1 && strings.EqualFold(args[0], "stats"):
 		return b.hookStatsText()
+	case len(args) == 1 && strings.EqualFold(args[0], "retry"):
+		return b.retryHooks(ctx, sender)
 	case len(args) > 0:
-		return "/hooks shows the latest checks; /hooks stats the totals since the bot started."
+		return "/hooks shows the latest checks; /hooks stats the totals since the bot started; /hooks retry checks the events that went out unchecked."
 	}
 	b.mu.Lock()
 	log := append([]hookEntry(nil), b.hookLog...)
@@ -105,6 +108,13 @@ func (b *Bot) hooksCommand(args []string) string {
 		}
 	}
 	sb.WriteString("\n\nKept since the bot started, up to 20. /hooks stats for the totals.")
+	if n := b.missedCount(); n > 0 {
+		them := "them"
+		if n == 1 {
+			them = "it"
+		}
+		fmt.Fprintf(&sb, "\n%s went out unchecked: /hooks retry checks %s now.", plural(n, "run"), them)
+	}
 	return sb.String()
 }
 
