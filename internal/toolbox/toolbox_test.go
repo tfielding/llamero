@@ -3,6 +3,7 @@ package toolbox
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -387,5 +388,38 @@ func TestSuggest(t *testing.T) {
 	}
 	if got := editDistance("kitten", "sitting"); got != 3 {
 		t.Errorf("editDistance = %d", got)
+	}
+}
+
+// Two Home Assistant URLs both offer GetDateTime; the second keeps only history. The left-out
+// copy mustn't give the kept one a prefix, and a tools: name that matches nothing is logged.
+func TestToolsListBeforeCollisionsAndUnmatchedNames(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	devices := server(t, "devices", "llm__GetDateTime", "HassTurnOn")
+	history := server(t, "history", "llm__GetDateTime", "history__get_history", "search__search")
+	box := New([]Server{
+		{Name: "ha", URL: devices.URL},
+		{Name: "ha_history", URL: history.URL, Tools: map[string]bool{"history__get_history": true, "search": true}},
+	}, Options{})
+	defer box.Close()
+	if got := names(box.Tools(context.Background())); got != "HassTurnOn,history__get_history,llm__GetDateTime" {
+		t.Fatalf("tools: %s", got)
+	}
+	if l := logs.String(); !strings.Contains(l, `"tools lists a tool the server doesn't have" server=ha_history tool=search did_you_mean=search__search`) {
+		t.Fatalf("no warning for the unmatched name:\n%s", l)
+	}
+
+	// mcp.tools still takes the prefixed name earlier versions required: it picks that server's
+	// tool, which, now without a twin, keeps its own name.
+	both := New([]Server{{Name: "ha", URL: devices.URL}, {Name: "ha_history", URL: history.URL}},
+		Options{Allowed: map[string]bool{"ha_history_llm__GetDateTime": true}})
+	defer both.Close()
+	ts := both.Tools(context.Background())
+	if len(ts) != 1 || ts[0].Name != "llm__GetDateTime" || ts[0].server != "ha_history" {
+		t.Fatalf("prefixed mcp.tools name: %+v", ts)
 	}
 }

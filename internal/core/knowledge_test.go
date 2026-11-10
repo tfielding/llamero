@@ -25,10 +25,10 @@ func TestKnowledgeReachesTheModel(t *testing.T) {
 	l.mu.Lock()
 	msgs := l.last
 	l.mu.Unlock()
-	// System prompt, then the notes, then tool guidance, then the conversation.
-	if len(msgs) < 4 || msgs[0].Content != "sys" || msgs[1].Role != "system" ||
+	// System prompt, then the notes, then tool guidance, then the conversation, then the time.
+	if len(msgs) < 5 || msgs[0].Content != "sys" || msgs[1].Role != "system" ||
 		!strings.HasSuffix(msgs[1].Content, "Our car is a blue hatchback.") || !strings.Contains(msgs[2].Content, "You have tools") ||
-		msgs[3].Role != "user" {
+		!strings.HasPrefix(msgs[3].Content, "Current date and time: ") || msgs[4].Role != "user" {
 		t.Fatalf("messages: %+v", msgs)
 	}
 	ft.mu.Lock()
@@ -60,7 +60,7 @@ func TestNoKnowledge(t *testing.T) {
 	l.mu.Lock()
 	n := len(l.last)
 	l.mu.Unlock()
-	if n != 2 { // system prompt + message
+	if n != 3 { // system prompt + time + message
 		t.Fatalf("%d messages", n)
 	}
 	b.Handle(dm(me, "/knowledge"))

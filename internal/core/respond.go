@@ -211,7 +211,16 @@ func (b *Bot) prompt(chat store.Chat, tools []toolbox.Tool, last ollama.Message)
 			"(those messages are no longer shown):\n" + chat.Summary})
 	}
 	msgs = append(msgs, forPrompt(chat.History)...)
+	// The time goes last, just before the message: models need it for "yesterday" or "this
+	// week", and anything that changes every minute near the start would make Ollama read the
+	// whole prompt again instead of reusing what it read for the previous message.
+	msgs = append(msgs, ollama.Message{Role: "system", Content: currentTime(time.Now().In(b.loc()))})
 	return append(msgs, last)
+}
+
+// currentTime tells the model the date and time, so it needn't call a tool for them.
+func currentTime(t time.Time) string {
+	return "Current date and time: " + t.Format("Monday 2 January 2006, 15:04 (MST, UTC-07:00)") + "."
 }
 
 // historyCap is how many messages a chat keeps. With summaries on, messages past the limit wait

@@ -804,8 +804,8 @@ func TestRetry(t *testing.T) {
 	l.mu.Lock()
 	calls, prompt := l.calls, l.last
 	l.mu.Unlock()
-	// The old exchange is not in the prompt, only the question again.
-	if calls != 2 || len(prompt) != 2 || prompt[1].Content != "hi" {
+	// The old exchange is not in the prompt, only the question again (after the time).
+	if calls != 2 || len(prompt) != 3 || prompt[2].Content != "hi" {
 		t.Fatalf("calls %d, prompt %+v", calls, prompt)
 	}
 	if c, _ := st.Load(me); len(c.History) != 2 || c.History[0].Content != "hi" {
@@ -912,3 +912,26 @@ type timeoutErr struct{}
 func (*timeoutErr) Error() string   { return "i/o timeout" }
 func (*timeoutErr) Timeout() bool   { return true }
 func (*timeoutErr) Temporary() bool { return true }
+
+func TestCurrentTimeInPrompt(t *testing.T) {
+	b, m, l, _ := setup(t)
+	b.opt.Location = time.FixedZone("EST", -5*3600)
+	b.Handle(dm(me, "hi"))
+	reply(t, m)
+	b.Handle(dm(me, "what happened yesterday?"))
+	reply(t, m)
+	l.mu.Lock()
+	msgs := l.last
+	l.mu.Unlock()
+	// Last before the message, after the earlier conversation, so the start of the prompt
+	// stays the same from one message to the next.
+	n := len(msgs)
+	if n < 4 || msgs[n-1].Content != "what happened yesterday?" || msgs[n-2].Role != "system" ||
+		!strings.HasPrefix(msgs[n-2].Content, "Current date and time: ") || msgs[n-3].Content != "echo: hi" {
+		t.Fatalf("messages: %+v", msgs)
+	}
+	at := time.Date(2026, 11, 10, 11, 20, 0, 0, time.FixedZone("EST", -5*3600))
+	if got, want := currentTime(at), "Current date and time: Tuesday 10 November 2026, 11:20 (EST, UTC-05:00)."; got != want {
+		t.Errorf("currentTime = %q, want %q", got, want)
+	}
+}

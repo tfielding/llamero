@@ -303,8 +303,14 @@ tool-specific code: list a server and its tools are offered to the model.
   Hooks and schedules only ever get read-only tools. If a server doesn't mark a tool that only
   looks things up, vouch for it with the server's `read_only`, using the name `/status` lists
   (newer Home Assistant versions prefix theirs: `read_only: [homeassistant__GetLiveContext]`).
-  Names in `read_only` or a hook's `tools` that don't match a usable tool are logged at startup,
-  with a close match if there is one, and a check is told which of its tools are missing.
+  Names in a server's `read_only` or `tools`, or in a hook's `tools`, that don't match a usable
+  tool are logged at startup, with a close match if there is one, and a check is told which of
+  its tools are missing.
+- If two servers offer tools with the same name, both get their server's name in front
+  (`ha_llm__GetDateTime`). Only tools that are offered count: one a server's `tools` leaves out
+  doesn't rename the other.
+- The model is told the current date and time with every message (in `TZ`), so "yesterday" or
+  "this week" doesn't take a tool call.
 - Tools are only offered to models that support tool calling (Ollama reports this per model).
 - Pictures a tool returns are sent to you with the reply. A vision model sees still ones (JPEG,
   PNG) too; clips such as frigate-mcp's animated GIFs are only for you, and the model is told one

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The model is told the current date and time with every message, chats and checks alike, so
+  questions about "yesterday" or "this week" don't spend a tool call on the time.
+- Names in a server's `tools` that it doesn't have are logged at startup, with a close match
+  (e.g. `search` → `search__search`), like names in `read_only` already were. A wrong name there
+  used to hide the tool without a word.
+
+### Changed
+- Two servers' tools with the same name only get the server name in front when both are offered.
+  A tool one server's `tools` leaves out no longer renames the other (`ha_llm__GetDateTime` is
+  `llm__GetDateTime` again). `mcp.tools` still accepts the prefixed name.
+
 ### Fixed
 - A model could say it had set a reminder without creating a schedule. The schedule tool now tells
   models it's the only way to do something later, and not to claim a schedule it didn't create.

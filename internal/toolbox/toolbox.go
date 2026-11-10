@@ -151,10 +151,13 @@ func (b *Box) Tools(ctx context.Context) []Tool {
 			errs[s.Name] = err
 			continue
 		}
-		b.checkReadOnly(s, ts)
+		b.checkNames(s, ts)
 		all = append(all, ts...)
 	}
-	all = b.filter(dedupe(all))
+	// Filter first, so a tool a server's tools: list leaves out doesn't make another server's
+	// tool of the same name get a prefix.
+	all = dedupe(b.filter(all))
+	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 
 	b.mu.Lock()
 	b.tools, b.errs, b.fetched = all, errs, time.Now()
@@ -561,7 +564,9 @@ func (b *Box) filter(tools []Tool) []Tool {
 	var out []Tool
 	for _, t := range tools {
 		srv, _ := b.server(t.server)
-		if len(b.opt.Allowed) > 0 && !b.opt.Allowed[t.Name] {
+		// mcp.tools takes the name as the server gives it, or with the server prefix that
+		// collisions get (as earlier versions required).
+		if len(b.opt.Allowed) > 0 && !b.opt.Allowed[t.Name] && !b.opt.Allowed[t.server+"_"+t.Name] {
 			continue
 		}
 		if len(srv.Tools) > 0 && !srv.Tools[t.remote] {
@@ -580,14 +585,14 @@ func (b *Box) filter(tools []Tool) []Tool {
 		t.Confirm = !t.ReadOnly && srv.Write == WriteAsk
 		out = append(out, t)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// checkReadOnly logs, once each, names in s's read_only list that s doesn't have: a misspelled
-// name would otherwise leave the tool out of hooks and schedules without a word.
-func (b *Box) checkReadOnly(s Server, ts []Tool) {
-	if len(s.ReadOnly) == 0 {
+// checkNames logs, once each, names in s's read_only and tools lists that s doesn't have: a
+// misspelled name would otherwise leave a tool out of hooks and schedules (read_only) or out
+// altogether (tools) without a word.
+func (b *Box) checkNames(s Server, ts []Tool) {
+	if len(s.ReadOnly) == 0 && len(s.Tools) == 0 {
 		return
 	}
 	have := map[string]bool{}
@@ -596,23 +601,28 @@ func (b *Box) checkReadOnly(s Server, ts []Tool) {
 		have[t.remote] = true
 		names[i] = t.remote
 	}
-	for _, name := range slices.Sorted(maps.Keys(s.ReadOnly)) {
-		if have[name] {
-			continue
+	for _, list := range []struct {
+		setting string
+		names   map[string]bool
+	}{{"read_only", s.ReadOnly}, {"tools", s.Tools}} {
+		for _, name := range slices.Sorted(maps.Keys(list.names)) {
+			if have[name] {
+				continue
+			}
+			key := list.setting + "/" + s.Name + "/" + name
+			b.mu.Lock()
+			first := !b.hidden[key]
+			b.hidden[key] = true
+			b.mu.Unlock()
+			if !first {
+				continue
+			}
+			args := []any{"server", s.Name, "tool", name}
+			if alt := Suggest(name, names); alt != "" {
+				args = append(args, "did_you_mean", alt)
+			}
+			slog.Warn(list.setting+" lists a tool the server doesn't have", args...)
 		}
-		key := "read_only/" + s.Name + "/" + name
-		b.mu.Lock()
-		first := !b.hidden[key]
-		b.hidden[key] = true
-		b.mu.Unlock()
-		if !first {
-			continue
-		}
-		args := []any{"server", s.Name, "tool", name}
-		if alt := Suggest(name, names); alt != "" {
-			args = append(args, "did_you_mean", alt)
-		}
-		slog.Warn("read_only lists a tool the server doesn't have", args...)
 	}
 }
 
