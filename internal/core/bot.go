@@ -39,6 +39,7 @@ type Tools interface {
 
 type Options struct {
 	Tools           Tools           // nil = no tools
+	MaxToolRounds   int             // rounds of tool calls per message before the model must answer; 0 = DefaultMaxToolRounds
 	Knowledge       *knowledge.Base // notes from the knowledge folder; nil = none
 	Schedules       *schedule.Store // scheduled checks; nil = off
 	Hooks           map[string]Hook // hooks by name; nil = none
@@ -109,6 +110,9 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	}
 	if opt.ApprovalTimeout == 0 {
 		opt.ApprovalTimeout = 2 * time.Minute
+	}
+	if opt.MaxToolRounds <= 0 {
+		opt.MaxToolRounds = DefaultMaxToolRounds
 	}
 	return &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},

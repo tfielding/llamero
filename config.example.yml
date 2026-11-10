@@ -59,6 +59,7 @@ mcp:
   allow_write: false                    # default for servers below: false, ask or true
   # tools: [get_snapshot]               # allowlist of tool names across all servers
   # max_result_chars: 32000
+  # max_tool_rounds: 6                  # rounds of tool calls per message before the model must answer
   servers:
     cams:
       url: http://go2rtc-mcp:8090/mcp

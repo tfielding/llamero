@@ -168,6 +168,24 @@ func TestReadOnlyToolsNeedNoApproval(t *testing.T) {
 	}
 }
 
+func TestMaxToolRounds(t *testing.T) {
+	for _, tc := range []struct{ set, want int }{{0, DefaultMaxToolRounds}, {2, 2}} {
+		b, m, l, ft := setupApproval(t, true)
+		l.toolCall.Function.Name, l.retry = "get_state", true // keeps calling a tool that works
+		if tc.set > 0 {
+			b.opt.MaxToolRounds = tc.set
+		}
+		b.Handle(dm(me, "is the kitchen light on?"))
+		reply(t, m)
+		if ft.called() != tc.want {
+			t.Errorf("max %d: %d tool calls, want %d", tc.set, ft.called(), tc.want)
+		}
+		if l.offered != nil {
+			t.Errorf("max %d: tools still offered for the final answer: %v", tc.set, l.offered)
+		}
+	}
+}
+
 func TestApprovalWords(t *testing.T) {
 	for _, s := range []string{"yes", "Y", "ok.", "Sure!", "go ahead", "👍"} {
 		if !approved(s) {

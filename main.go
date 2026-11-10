@@ -146,21 +146,22 @@ func run() error {
 	}
 	know.Get() // log what's there at startup
 	b := core.New(router, llm, st, core.Options{
-		Tools:        tools,
-		Knowledge:    know,
-		Schedules:    schedules,
-		Hooks:        botHooks(cfg.Hooks),
-		Allowed:      cfg.Allowed(),
-		DefaultModel: cfg.DefaultModel,
-		VisionModel:  cfg.VisionModel,
-		SystemPrompt: cfg.SystemPrompt,
-		HistoryLimit: cfg.HistoryLimit,
-		Summarize:    cfg.Summarize,
-		SummaryModel: cfg.SummaryModel,
-		Settings:     cfg.Describe(),
-		Wake:         wake,
-		WakeWait:     cfg.WakeWait,
-		Reaction:     cfg.Reaction,
+		Tools:         tools,
+		MaxToolRounds: cfg.MCPMaxRounds,
+		Knowledge:     know,
+		Schedules:     schedules,
+		Hooks:         botHooks(cfg.Hooks),
+		Allowed:       cfg.Allowed(),
+		DefaultModel:  cfg.DefaultModel,
+		VisionModel:   cfg.VisionModel,
+		SystemPrompt:  cfg.SystemPrompt,
+		HistoryLimit:  cfg.HistoryLimit,
+		Summarize:     cfg.Summarize,
+		SummaryModel:  cfg.SummaryModel,
+		Settings:      cfg.Describe(),
+		Wake:          wake,
+		WakeWait:      cfg.WakeWait,
+		Reaction:      cfg.Reaction,
 	})
 	ready.Store(b)
 	b.CheckHookTools(ctx)

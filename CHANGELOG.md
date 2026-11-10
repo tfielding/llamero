@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
 ### Added
 - `mcp.servers.<name>.read_only`: tools to treat as read-only although their server doesn't mark
   them, so hooks and schedules get them (e.g. Home Assistant's `homeassistant__GetLiveContext`).
@@ -26,6 +28,9 @@ All notable changes to this project are documented here. The format follows
   (`/snooze camera_alert front_door 1h`). `/snooze` lists them and `/snooze off` ends them.
 - Hook `title`: the first line of a hook's messages, e.g. `📷 Camera` instead of "🔔 camera_alert",
   or `none` for no title line.
+- `mcp.max_tool_rounds` (`MCP_MAX_TOOL_ROUNDS`): how many rounds of tool calls a message can
+  take before the model has to answer, 1 to 50 (default 6, as before). Raise it for setups where
+  answering takes more lookups, such as a large Home Assistant.
 - `ollama.backup_url` (`OLLAMA_BACKUP_URL`): a backup Ollama server, used when the main one can't
   be reached. The main server is tried first again after a minute.
 

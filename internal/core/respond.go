@@ -20,8 +20,9 @@ import (
 	"github.com/tfielding/llamero/internal/transport"
 )
 
-// maxToolRounds limits how many times the model can call tools before answering.
-const maxToolRounds = 6
+// DefaultMaxToolRounds limits how many times the model can call tools before answering,
+// unless Options.MaxToolRounds says otherwise.
+const DefaultMaxToolRounds = 6
 
 // maxToolFailures stops tool use early when calls keep failing.
 const maxToolFailures = 3
@@ -288,7 +289,7 @@ func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Messa
 	declines := 0
 	toolsOver := false // the user declined twice or didn't answer: no more tool calls
 	for round := 0; ; round++ {
-		if round == maxToolRounds || failures >= maxToolFailures || toolsOver {
+		if round == b.opt.MaxToolRounds || failures >= maxToolFailures || toolsOver {
 			if len(defs) > 0 {
 				slog.Warn("no more tool calls for this message, asking for a final answer", "rounds", round, "failures", failures)
 				msgs = append(msgs, ollama.Message{Role: "system", Content: "Tool use is over for this message. " +

@@ -73,6 +73,7 @@ type fileConfig struct {
 		AllowWrite     string                `yaml:"allow_write"`
 		Tools          stringList            `yaml:"tools"`
 		MaxResultChars string                `yaml:"max_result_chars"`
+		MaxToolRounds  string                `yaml:"max_tool_rounds"`
 		Servers        map[string]fileServer `yaml:"servers"`
 	} `yaml:"mcp"`
 }
@@ -129,6 +130,7 @@ var fileKeys = map[string]string{
 	"MCP_ALLOW_WRITE":          "mcp.allow_write",
 	"MCP_TOOLS":                "mcp.tools",
 	"MCP_MAX_RESULT_CHARS":     "mcp.max_result_chars",
+	"MCP_MAX_TOOL_ROUNDS":      "mcp.max_tool_rounds",
 	"WEBHOOK_TOKEN":            "webhooks.token",
 }
 
@@ -212,6 +214,7 @@ func loadFile(path string) (file, error) {
 		"MCP_ALLOW_WRITE":          fc.MCP.AllowWrite,
 		"MCP_TOOLS":                strings.Join(fc.MCP.Tools, ","),
 		"MCP_MAX_RESULT_CHARS":     fc.MCP.MaxResultChars,
+		"MCP_MAX_TOOL_ROUNDS":      fc.MCP.MaxToolRounds,
 		"WEBHOOK_TOKEN":            fc.Webhooks.Token,
 	}}
 	for k, v := range f.values {

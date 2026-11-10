@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tfielding/llamero/internal/app"
+	"github.com/tfielding/llamero/internal/core"
 	"github.com/tfielding/llamero/internal/knowledge"
 	"github.com/tfielding/llamero/internal/toolbox"
 	"github.com/tfielding/llamero/internal/transport/telegram"
@@ -50,10 +51,11 @@ type Config struct {
 	WakeAddr string           // where to send the magic packet (host:port)
 	WakeWait time.Duration    // how long to wait for Ollama after a wake-up
 
-	MCPServers  []toolbox.Server // mcp.servers in the file, or MCP_SERVERS=name=url,...; MCP_TOKEN_<NAME>
-	MCPTools    map[string]bool  // optional allowlist of tool names, across servers
-	MCPWrite    toolbox.Write    // default for servers without their own allow_write
-	MCPMaxChars int              // cap on tool output given to the model
+	MCPServers   []toolbox.Server // mcp.servers in the file, or MCP_SERVERS=name=url,...; MCP_TOKEN_<NAME>
+	MCPTools     map[string]bool  // optional allowlist of tool names, across servers
+	MCPWrite     toolbox.Write    // default for servers without their own allow_write
+	MCPMaxChars  int              // cap on tool output given to the model
+	MCPMaxRounds int              // rounds of tool calls per message before the model must answer
 
 	Schedules  bool   // scheduled checks (create_schedule tool, /schedules)
 	HealthAddr string // where GET /healthz listens, e.g. ":8092"; empty = off
@@ -216,6 +218,9 @@ func Load() (Config, error) {
 	}
 	if c.MCPMaxChars, err = strconv.Atoi(s.get("MCP_MAX_RESULT_CHARS", strconv.Itoa(toolbox.DefaultMaxResultChars))); err != nil || c.MCPMaxChars < 1000 {
 		return c, fmt.Errorf("%s must be an integer >= 1000", s.name("MCP_MAX_RESULT_CHARS"))
+	}
+	if c.MCPMaxRounds, err = strconv.Atoi(s.get("MCP_MAX_TOOL_ROUNDS", strconv.Itoa(core.DefaultMaxToolRounds))); err != nil || c.MCPMaxRounds < 1 || c.MCPMaxRounds > 50 {
+		return c, fmt.Errorf("%s must be an integer from 1 to 50", s.name("MCP_MAX_TOOL_ROUNDS"))
 	}
 	if c.Hooks, err = s.hooks(c); err != nil {
 		return c, err
@@ -672,6 +677,7 @@ func (c Config) Describe() string {
 		line("MCP_TOOLS", tools)
 		line("MCP_ALLOW_WRITE", c.MCPWrite)
 		line("MCP_MAX_RESULT_CHARS", c.MCPMaxChars)
+		line("MCP_MAX_TOOL_ROUNDS", c.MCPMaxRounds)
 	}
 	if len(c.Hooks) > 0 {
 		line("WEBHOOK_TOKEN", "set")

@@ -181,6 +181,29 @@ func TestKnowledgeSettings(t *testing.T) {
 	}
 }
 
+func TestMaxToolRounds(t *testing.T) {
+	t.Setenv("SIGNAL_NUMBER", "+15550000009")
+	t.Setenv("SIGNAL_ALLOWED_SENDERS", "+15550000001")
+	t.Setenv("MCP_SERVERS", "ha=http://homeassistant:8123/api/mcp")
+	c, err := Load()
+	if err != nil || c.MCPMaxRounds != 6 {
+		t.Fatalf("default: %d %v", c.MCPMaxRounds, err)
+	}
+	if d := c.Describe(); !strings.Contains(d, "\nMCP_MAX_TOOL_ROUNDS: 6") {
+		t.Fatalf("describe:\n%s", d)
+	}
+	t.Setenv("MCP_MAX_TOOL_ROUNDS", "12")
+	if c, err = Load(); err != nil || c.MCPMaxRounds != 12 {
+		t.Fatalf("set: %d %v", c.MCPMaxRounds, err)
+	}
+	for _, bad := range []string{"0", "51", "lots"} {
+		t.Setenv("MCP_MAX_TOOL_ROUNDS", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MCP_MAX_TOOL_ROUNDS") {
+			t.Errorf("MCP_MAX_TOOL_ROUNDS=%s: %v", bad, err)
+		}
+	}
+}
+
 // writeConfig writes a config file and points CONFIG_FILE at it.
 func writeConfig(t *testing.T, yml string) string {
 	t.Helper()
@@ -209,6 +232,7 @@ knowledge:
   max_chars: 4000
 mcp:
   allow_write: false
+  max_tool_rounds: 10
   servers:
     frigate:
       url: http://frigate-mcp:8091/mcp
@@ -230,7 +254,7 @@ func TestConfigFile(t *testing.T) {
 	}
 	if c.ConfigFile != path || c.Signal.Number != "+15550000009" || len(c.Signal.Allowed) != 2 || !c.Signal.Allowed["+15550000002"] ||
 		c.OllamaURL != "http://192.168.1.50:11434" || c.DefaultModel != "llama3.2:latest" || c.OllamaTimeout != 2*time.Minute ||
-		c.HistoryLimit != 20 || c.Summarize || c.Reaction != "" || c.KnowledgeMaxChars != 4000 ||
+		c.HistoryLimit != 20 || c.Summarize || c.Reaction != "" || c.KnowledgeMaxChars != 4000 || c.MCPMaxRounds != 10 ||
 		c.Signal.URL != "http://signal-cli-rest-api:8080" { // not in the file: default
 		t.Fatalf("%+v", c)
 	}

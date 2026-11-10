@@ -253,6 +253,7 @@ Settings come from an optional config file, environment variables, or both.
 | | `mcp.servers.<name>.knowledge` | `<name>.md` if present | The server's notes file in the [knowledge folder](#knowledge); must exist |
 | `MCP_TOOLS` | `mcp.tools` | all | Only these tools, across all servers |
 | `MCP_MAX_RESULT_CHARS` | `mcp.max_result_chars` | `32000` | Max characters of tool output given to the model (about 8k tokens); Ollama's context window must hold it |
+| `MCP_MAX_TOOL_ROUNDS` | `mcp.max_tool_rounds` | `6` | Rounds of tool calls per message (1 to 50) before the model has to answer with what it has |
 | `HEALTH_ADDR` | `health.addr` | `:8092` | Where [`GET /healthz`](#health) listens; `off` to disable |
 | `SCHEDULES` | `schedules.enabled` | `true` | [Scheduled checks](#schedules): the `create_schedule` tool and `/schedules` |
 | `WEBHOOK_TOKEN` | `webhooks.token` | none | Token [hook](#hooks) callers send as `Authorization: Bearer <token>`; at least 16 characters, required with hooks |
@@ -310,7 +311,7 @@ tool-specific code: list a server and its tools are offered to the model.
   was sent.
 - Each server's notes reach the model with its tools: what the server sends itself (MCP
   "instructions"), plus its [knowledge](#knowledge) file.
-- Up to 6 rounds of tool calls per message. A read-only call that fails because of optional
+- Up to 6 rounds of tool calls per message (`mcp.max_tool_rounds`). A read-only call that fails because of optional
   arguments the model guessed is retried once without them.
 - `/status` lists the tools and any unreachable server. Lists refresh every minute, and sessions
   reconnect if a server restarts.
