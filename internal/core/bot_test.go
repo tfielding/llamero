@@ -352,9 +352,31 @@ func TestStats(t *testing.T) {
 	reply(t, m)
 	b.Handle(dm(me, "/stats"))
 	r := reply(t, m)
-	for _, want := range []string{"Last reply: llama3.2:latest", "Output: 100 tokens at 50.0 tok/s (2s)", "Prompt: 50 tokens at 100 tok/s", "Total: 3s"} {
+	for _, want := range []string{"Last reply: llama3.2:latest", "Output: 100 tokens at 50.0 tok/s (2s), thinking included",
+		"Reading the prompt: 500ms (50 tokens at 100 tok/s)", "Total: 3s"} {
 		if !strings.Contains(r, want) {
 			t.Fatalf("missing %q in %q", want, r)
+		}
+	}
+	if strings.Contains(r, "Model calls") {
+		t.Errorf("one call shown as several: %q", r)
+	}
+}
+
+// With tools, the prompt time is split: Ollama reuses what it read for earlier calls but counts
+// it again, so the count alone looks like rereading.
+func TestStatsAfterTools(t *testing.T) {
+	var s ollama.Stats
+	s.Add(ollama.Stats{PromptEvalCount: 11000, PromptEvalDuration: 15 * time.Second, EvalCount: 100, EvalDuration: 2 * time.Second, TotalDuration: 18 * time.Second})
+	for range 3 {
+		s.Add(ollama.Stats{PromptEvalCount: 11100, PromptEvalDuration: 300 * time.Millisecond, EvalCount: 50, EvalDuration: time.Second, TotalDuration: 2 * time.Second})
+	}
+	r := statsText(&store.LastReply{Model: "gemma", At: time.Now(), Stats: s})
+	for _, want := range []string{"Model calls: 4 (it used tools)", "Output: 250 tokens",
+		"Reading the prompt: 15.9s (first call 15s, the other 3 900ms)",
+		"Prompt tokens: 44300 over the 4 calls, counting the ones Ollama reused"} {
+		if !strings.Contains(r, want) {
+			t.Errorf("missing %q in:\n%s", want, r)
 		}
 	}
 }

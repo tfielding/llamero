@@ -279,11 +279,21 @@ func statsText(l *store.LastReply) string {
 	s := l.Stats
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Last reply: %s, %s ago\n", l.Model, time.Since(l.At).Round(time.Second))
-	fmt.Fprintf(&sb, "Output: %d tokens at %.1f tok/s (%s)\n", s.EvalCount, s.TokensPerSecond(), round(s.EvalDuration))
-	fmt.Fprintf(&sb, "Prompt: %d tokens at %.0f tok/s (%s)\n", s.PromptEvalCount, s.PromptTokensPerSecond(), round(s.PromptEvalDuration))
+	if s.Calls > 1 {
+		fmt.Fprintf(&sb, "Model calls: %d (it used tools)\n", s.Calls)
+	}
+	fmt.Fprintf(&sb, "Output: %d tokens at %.1f tok/s (%s), thinking included\n", s.EvalCount, s.TokensPerSecond(), round(s.EvalDuration))
+	if s.Calls > 1 {
+		// Ollama reuses what it read for the previous call, but counts those tokens again: the
+		// time per call says what was really read.
+		fmt.Fprintf(&sb, "Reading the prompt: %s (first call %s, the other %d %s)\n", round(s.PromptEvalDuration), round(s.FirstPrompt),
+			s.Calls-1, round(s.PromptEvalDuration-s.FirstPrompt))
+		fmt.Fprintf(&sb, "Prompt tokens: %d over the %d calls, counting the ones Ollama reused\n", s.PromptEvalCount, s.Calls)
+	} else {
+		fmt.Fprintf(&sb, "Reading the prompt: %s (%d tokens at %.0f tok/s)\n", round(s.PromptEvalDuration), s.PromptEvalCount, s.PromptTokensPerSecond())
+	}
 	fmt.Fprintf(&sb, "Model load: %s\n", round(s.LoadDuration))
-	fmt.Fprintf(&sb, "Total: %s\n", round(s.TotalDuration))
-	sb.WriteString("(Output includes thinking tokens.)")
+	fmt.Fprintf(&sb, "Total: %s", round(s.TotalDuration))
 	return sb.String()
 }
 

@@ -23,6 +23,9 @@ All notable changes to this project are documented here. The format follows
   used to hide the tool without a word.
 
 ### Changed
+- `/stats` after a reply that used tools shows how many model calls it took and splits the time
+  reading the prompt into the first call and the rest. Ollama reuses what it read for earlier
+  calls but counts those tokens again, so the total count looked like rereading when it wasn't.
 - Config file errors list every problem at once, and unknown keys get a hint: the setting it's
   probably a misspelling of (`modle` → `model`), or, for an MCP server or hook indented under
   the wrong section, where it goes.

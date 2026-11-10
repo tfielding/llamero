@@ -76,6 +76,12 @@ type Stats struct {
 	PromptEvalDuration time.Duration `json:"prompt_eval_duration"`
 	EvalCount          int           `json:"eval_count"`
 	EvalDuration       time.Duration `json:"eval_duration"`
+
+	// Set by Add, over several calls (tool use): how many, and the first one's prompt time.
+	// Ollama counts prompt tokens it reused from an earlier call too, so after the first call
+	// the time says more than the count.
+	Calls       int           `json:"calls,omitempty"`
+	FirstPrompt time.Duration `json:"first_prompt,omitempty"`
 }
 
 func (s Stats) TokensPerSecond() float64       { return rate(s.EvalCount, s.EvalDuration) }
@@ -83,6 +89,10 @@ func (s Stats) PromptTokensPerSecond() float64 { return rate(s.PromptEvalCount, 
 
 // Add accumulates another call's stats (for multi-step tool use).
 func (s *Stats) Add(o Stats) {
+	if s.Calls == 0 {
+		s.FirstPrompt = o.PromptEvalDuration
+	}
+	s.Calls++
 	s.TotalDuration += o.TotalDuration
 	s.LoadDuration += o.LoadDuration
 	s.PromptEvalCount += o.PromptEvalCount
