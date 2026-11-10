@@ -70,9 +70,9 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		return false
 	}
 	key = strings.TrimSpace(key)
-	b.mu.Lock()
-	until := b.cooldowns[name+"\x00"+key]
-	b.mu.Unlock()
+	b.hooks.mu.Lock()
+	until := b.hooks.cooldowns[name+"\x00"+key]
+	b.hooks.mu.Unlock()
 	if time.Now().Before(until) {
 		slog.Info("hook event skipped: cooling down", "hook", name, "key", key, "for", time.Until(until).Round(time.Second))
 		b.logHook(name, outCooling, []string{key}, text, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
@@ -86,11 +86,11 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	if r := []rune(strings.TrimSpace(text)); len(r) > maxHookEventChars {
 		text = string(r[:maxHookEventChars]) + "…"
 	}
-	b.mu.Lock()
-	run, waiting := b.hookRuns[name]
+	b.hooks.mu.Lock()
+	run, waiting := b.hooks.runs[name]
 	if !waiting {
 		run = &hookRun{name: name, keys: map[string]bool{}}
-		b.hookRuns[name] = run
+		b.hooks.runs[name] = run
 	}
 	run.keys[key] = true
 	if len(run.events) < maxHookEvents {
@@ -98,7 +98,7 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	} else {
 		run.dropped++
 	}
-	b.mu.Unlock()
+	b.hooks.mu.Unlock()
 	slog.Info("hook event", "hook", name, "chars", len(text), "grouped", waiting)
 	if waiting {
 		return true
@@ -113,10 +113,10 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 			case <-time.After(h.Group):
 			}
 		}
-		b.mu.Lock()
-		run := b.hookRuns[name]
-		delete(b.hookRuns, name)
-		b.mu.Unlock()
+		b.hooks.mu.Lock()
+		run := b.hooks.runs[name]
+		delete(b.hooks.runs, name)
+		b.hooks.mu.Unlock()
 		// The run goes in the first recipient's queue, behind their own messages, and uses
 		// their chat's model (a group's, which is the default, if it only goes to groups).
 		to := slices.Concat(b.hookRecipients(h), h.Groups)
@@ -270,16 +270,16 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 func (b *Bot) sendHook(ctx context.Context, h Hook, run *hookRun, to []string, r response) {
 	if h.Cooldown > 0 && run.missedAt.IsZero() {
 		until := time.Now().Add(h.Cooldown)
-		b.mu.Lock()
-		for k, t := range b.cooldowns {
+		b.hooks.mu.Lock()
+		for k, t := range b.hooks.cooldowns {
 			if time.Now().After(t) {
-				delete(b.cooldowns, k)
+				delete(b.hooks.cooldowns, k)
 			}
 		}
 		for key := range run.keys {
-			b.cooldowns[h.Name+"\x00"+key] = until
+			b.hooks.cooldowns[h.Name+"\x00"+key] = until
 		}
-		b.mu.Unlock()
+		b.hooks.mu.Unlock()
 	}
 	for _, recipient := range to {
 		if err := b.send(ctx, recipient, r); err != nil {
@@ -323,22 +323,32 @@ func (b *Bot) CheckHookTools(ctx context.Context) {
 	if b.opt.Tools == nil {
 		return
 	}
-	all := b.opt.Tools.Tools(ctx)
+	problems := HookToolProblems(b.opt.Hooks, b.opt.Tools.Tools(ctx))
+	for _, name := range slices.Sorted(maps.Keys(problems)) {
+		slog.Warn("hook lists tools its checks can't use", "hook", name, "tools", strings.Join(problems[name], "; "))
+	}
+}
+
+// HookToolProblems is, for each hook whose tools list has tools its checks can't use, those
+// tools and why, given all the tools there are.
+func HookToolProblems(hooks map[string]Hook, all []toolbox.Tool) map[string][]string {
 	usable := map[string]bool{}
 	for _, t := range all {
 		usable[t.Name] = t.ReadOnly
 	}
-	for _, name := range slices.Sorted(maps.Keys(b.opt.Hooks)) {
+	out := map[string][]string{}
+	for name, h := range hooks {
 		var missing []string
-		for _, t := range b.opt.Hooks[name].Tools {
+		for _, t := range h.Tools {
 			if !usable[t] {
 				missing = append(missing, t)
 			}
 		}
 		if len(missing) > 0 {
-			slog.Warn("hook lists tools its checks can't use", "hook", name, "tools", strings.Join(toolProblems(all, missing), "; "))
+			out[name] = toolProblems(all, missing)
 		}
 	}
+	return out
 }
 
 // toolProblems says why each of names isn't among the tools a check can use: it needs approval,
@@ -370,29 +380,33 @@ func toolProblems(all []toolbox.Tool, names []string) []string {
 
 // addMissed keeps a run whose events went out unchecked, for /hooks retry.
 func (b *Bot) addMissed(run *hookRun, why string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.missed = append(b.missed, missedRun{run: run, why: why})
-	if len(b.missed) > maxMissed {
-		b.missed = b.missed[len(b.missed)-maxMissed:]
+	b.hooks.mu.Lock()
+	b.hooks.missed = append(b.hooks.missed, missedRun{run: run, why: why})
+	if len(b.hooks.missed) > maxMissed {
+		b.hooks.missed = b.hooks.missed[len(b.hooks.missed)-maxMissed:]
 	}
+	b.hooks.mu.Unlock()
+	b.saveHookState()
 }
 
 // missedCount is how many unchecked runs /hooks retry would check.
 func (b *Bot) missedCount() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.missed)
+	b.hooks.mu.Lock()
+	defer b.hooks.mu.Unlock()
+	return len(b.hooks.missed)
 }
 
 // retryHooks answers /hooks retry: the runs that went out unchecked are checked again, in
 // sender's queue and with their chat model. What a check finds goes to the hook's people as
 // usual; sender hears about the ones with nothing to send.
 func (b *Bot) retryHooks(ctx context.Context, sender string) string {
-	b.mu.Lock()
-	runs := b.missed
-	b.missed = nil
-	b.mu.Unlock()
+	b.hooks.mu.Lock()
+	runs := b.hooks.missed
+	b.hooks.missed = nil
+	b.hooks.mu.Unlock()
+	if len(runs) > 0 {
+		b.saveHookState()
+	}
 	if len(runs) == 0 {
 		return "No missed hook checks to retry. Events that go out unchecked (Ollama down, or the model failed) can be checked again here."
 	}

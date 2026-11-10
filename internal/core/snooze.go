@@ -1,7 +1,7 @@
 package core
 
-// /snooze: mute hooks for a while, for the person who asks. Kept in memory only, so a restart
-// ends every snooze (messages come back rather than staying muted).
+// /snooze: mute hooks for a while, for the person who asks. Snoozes are saved with the hook state,
+// so they last through a restart.
 
 import (
 	"fmt"
@@ -21,14 +21,14 @@ type snoozeKey struct{ who, hook, key string }
 // snoozed.
 func (b *Bot) snoozedFor(who, hook string, keys map[string]bool) time.Duration {
 	now := time.Now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	whole := later(b.snoozes[snoozeKey{who, "", ""}], b.snoozes[snoozeKey{who, hook, ""}])
+	b.hooks.mu.Lock()
+	defer b.hooks.mu.Unlock()
+	whole := later(b.hooks.snoozes[snoozeKey{who, "", ""}], b.hooks.snoozes[snoozeKey{who, hook, ""}])
 	least := time.Duration(-1)
 	for k := range keys {
 		until := whole
 		if k != "" {
-			until = later(until, b.snoozes[snoozeKey{who, hook, strings.ToLower(k)}])
+			until = later(until, b.hooks.snoozes[snoozeKey{who, hook, strings.ToLower(k)}])
 		}
 		left := until.Sub(now)
 		if left <= 0 {
@@ -104,17 +104,18 @@ func (b *Bot) snoozeCommand(sender string, args []string) string {
 
 	if last == "off" {
 		n := 0
-		b.mu.Lock()
-		for k := range b.snoozes {
+		b.hooks.mu.Lock()
+		for k := range b.hooks.snoozes {
 			if k.who == sender && (hook == "" || k.hook == hook && (key == "" || k.key == key)) {
-				delete(b.snoozes, k)
+				delete(b.hooks.snoozes, k)
 				n++
 			}
 		}
-		b.mu.Unlock()
+		b.hooks.mu.Unlock()
 		if n == 0 {
 			return "Nothing to unsnooze for " + what + "."
 		}
+		b.saveHookState()
 		return "Unsnoozed " + what + "."
 	}
 
@@ -123,14 +124,15 @@ func (b *Bot) snoozeCommand(sender string, args []string) string {
 		return err.Error() + "\n\n" + snoozeUsage
 	}
 	until := time.Now().Add(d)
-	b.mu.Lock()
-	for k, t := range b.snoozes {
+	b.hooks.mu.Lock()
+	for k, t := range b.hooks.snoozes {
 		if time.Now().After(t) {
-			delete(b.snoozes, k)
+			delete(b.hooks.snoozes, k)
 		}
 	}
-	b.snoozes[snoozeKey{sender, hook, key}] = until
-	b.mu.Unlock()
+	b.hooks.snoozes[snoozeKey{sender, hook, key}] = until
+	b.hooks.mu.Unlock()
+	b.saveHookState()
 	return fmt.Sprintf("Snoozed %s for %s, until %s. /snooze off to undo.", what, humanDuration(d), b.clock(until))
 }
 
@@ -142,8 +144,8 @@ func (b *Bot) snoozeList(sender string) string {
 	}
 	var items []item
 	now := time.Now()
-	b.mu.Lock()
-	for k, t := range b.snoozes {
+	b.hooks.mu.Lock()
+	for k, t := range b.hooks.snoozes {
 		if k.who != sender || !t.After(now) {
 			continue
 		}
@@ -156,7 +158,7 @@ func (b *Bot) snoozeList(sender string) string {
 		}
 		items = append(items, item{what, t})
 	}
-	b.mu.Unlock()
+	b.hooks.mu.Unlock()
 	if len(items) == 0 {
 		return "Nothing is snoozed.\n\n" + snoozeUsage
 	}

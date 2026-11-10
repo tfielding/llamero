@@ -1,7 +1,10 @@
 package core
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -462,10 +465,10 @@ func TestHooksRetry(t *testing.T) {
 	if got := reply(t, m); !strings.Contains(got, "\n1 run went out unchecked: /hooks retry checks it now.") {
 		t.Fatalf("/hooks:\n%s", got)
 	}
-	b.mu.Lock()
-	at := b.clock(b.missed[0].run.missedAt)
-	cooling := b.cooldowns["door\x00front_door"] // from the unchecked message
-	b.mu.Unlock()
+	b.hooks.mu.Lock()
+	at := b.clock(b.hooks.missed[0].run.missedAt)
+	cooling := b.hooks.cooldowns["door\x00front_door"] // from the unchecked message
+	b.hooks.mu.Unlock()
 
 	// Still down: it stays on the list, and the one who asked hears so.
 	b.Handle(dm(me, "/hooks retry"))
@@ -486,9 +489,9 @@ func TestHooksRetry(t *testing.T) {
 		got[1] != "🔔 **door** (rechecked, events from "+at+")\n\nSomeone left a parcel." {
 		t.Fatalf("retry when up: %q", got)
 	}
-	b.mu.Lock()
-	after := b.cooldowns["door\x00front_door"]
-	b.mu.Unlock()
+	b.hooks.mu.Lock()
+	after := b.hooks.cooldowns["door\x00front_door"]
+	b.hooks.mu.Unlock()
 	if !after.Equal(cooling) {
 		t.Errorf("the recheck moved the cooldown from %v to %v", cooling, after)
 	}
@@ -514,5 +517,56 @@ func TestHooksRetryNothingToReport(t *testing.T) {
 	got := replies(t, m, 2)
 	if !strings.HasPrefix(got[1], "door (events from ") || !strings.HasSuffix(got[1], "): nothing to report (Just the wind)") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// Snoozes and missed runs outlast a restart; the hook log doesn't need to.
+func TestHookStateSurvivesRestart(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door."})
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	b.opt.HookStateFile = path
+	b.Handle(dm(me, "/snooze door front_door 2h"))
+	reply(t, m)
+	l.pingErr = errors.New("connection refused")
+	b.Hook(b.ctx, "door", "person on back_door", "back_door")
+	reply(t, m)
+	// The run is saved just after its unchecked message is sent.
+	for i := 0; i < 100; i++ {
+		if data, _ := os.ReadFile(path); strings.Contains(string(data), "back_door") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// A new bot, as after a restart, with the same file.
+	again := New(m, l, b.store, Options{Allowed: b.opt.Allowed, DefaultModel: "llama3.2:latest", Hooks: b.opt.Hooks,
+		Tools: b.opt.Tools, HookStateFile: path, TypingRefresh: time.Millisecond})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); again.Wait() })
+	b2 := testBot{again, ctx}
+	b2.Handle(dm(me, "/snooze"))
+	if got := reply(t, m); !strings.Contains(got, "door [front_door]") {
+		t.Errorf("snooze lost:\n%s", got)
+	}
+	b2.Handle(dm(me, "/hooks"))
+	if got := reply(t, m); !strings.Contains(got, "1 run from before went out unchecked") {
+		t.Errorf("missed run lost:\n%s", got)
+	}
+	l.mu.Lock()
+	l.pingErr, l.answer = nil, "Someone at the back door."
+	l.mu.Unlock()
+	b2.Handle(dm(me, "/hooks retry"))
+	got := replies(t, m, 2)
+	if !strings.Contains(got[0], "door [back_door]: Ollama is unreachable") || !strings.HasPrefix(got[1], "🔔 **door** (rechecked, events from ") {
+		t.Fatalf("retry after restart: %q", got)
+	}
+
+	// An unreadable file doesn't stop the bot.
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken := New(m, l, b.store, Options{Allowed: b.opt.Allowed, HookStateFile: path})
+	if broken.missedCount() != 0 {
+		t.Error("loaded something from a broken file")
 	}
 }

@@ -42,10 +42,10 @@ type keyStats struct{ events, messages int }
 // countHook adds a handled run (or skipped event) to the hook's stats. why is the reason for an
 // unchecked one. The caller holds b.mu.
 func (b *Bot) countHook(hook string, kind hookOutcome, keys []string, why string, took time.Duration) {
-	s := b.hookStats[hook]
+	s := b.hooks.stats[hook]
 	if s == nil {
 		s = &hookStats{unchecked: map[string]int{}, keys: map[string]*keyStats{}}
-		b.hookStats[hook] = s
+		b.hooks.stats[hook] = s
 	}
 	s.counts[kind]++
 	switch kind {
@@ -79,11 +79,11 @@ func (b *Bot) hookStatsText() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Hook stats since the bot started (%s, %s ago):\n",
 		b.boot.In(b.loc()).Format("Mon 2 Jan 15:04"), humanDuration(time.Since(b.boot)))
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.hooks.mu.Lock()
+	defer b.hooks.mu.Unlock()
 	for _, name := range b.hookNames() {
 		fmt.Fprintf(&sb, "\n%s\n", name)
-		s := b.hookStats[name]
+		s := b.hooks.stats[name]
 		if s == nil {
 			sb.WriteString("- no events yet\n")
 			continue

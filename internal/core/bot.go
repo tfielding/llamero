@@ -59,6 +59,7 @@ type Options struct {
 	ApprovalTimeout time.Duration               // how long to wait for that answer
 	Reaction        string                      // emoji shown on a message while it's being answered; empty = off
 	TypingRefresh   time.Duration               // how often the typing indicator is renewed (Signal clients hide it after ~15s)
+	HookStateFile   string                      // where snoozes and missed hook runs are saved; empty = memory only
 }
 
 type Bot struct {
@@ -70,16 +71,12 @@ type Bot struct {
 	mu        sync.Mutex
 	queues    map[string]chan message // one worker per sender keeps replies in order
 	scheduled map[string]bool         // scheduled runs waiting or running, by "chat#id"
-	hookRuns  map[string]*hookRun     // hook events waiting for their run, by hook
-	cooldowns map[string]time.Time    // until when each hook (and key) skips events, after a message
-	snoozes   map[snoozeKey]time.Time // until when someone gets no messages from a hook (/snooze)
-	hookLog   []hookEntry             // the latest hook checks, for /hooks
-	missed    []missedRun             // runs whose events went out unchecked, for /hooks retry
-	hookStats map[string]*hookStats   // how each hook's events were handled, for /hooks stats
 	boot      time.Time               // when the bot started
 	approvals map[string]chan string  // sender's answer to a pending tool approval
 	active    map[string]activity     // model call currently running, per sender
 	workers   sync.WaitGroup
+
+	hooks hookState // hook runs, cooldowns, snoozes and what happened to them; its own lock
 }
 
 // message is an incoming message waiting to be answered, or a scheduled check to run.
@@ -115,10 +112,11 @@ func New(m Messenger, l LLM, s *store.Store, opt Options) *Bot {
 	if opt.MaxToolRounds <= 0 {
 		opt.MaxToolRounds = DefaultMaxToolRounds
 	}
-	return &Bot{msg: m, llm: l, store: s, opt: opt,
+	b := &Bot{msg: m, llm: l, store: s, opt: opt,
 		queues: map[string]chan message{}, approvals: map[string]chan string{}, active: map[string]activity{},
-		scheduled: map[string]bool{}, hookRuns: map[string]*hookRun{}, cooldowns: map[string]time.Time{}, snoozes: map[snoozeKey]time.Time{},
-		hookStats: map[string]*hookStats{}, boot: time.Now()}
+		scheduled: map[string]bool{}, boot: time.Now(), hooks: newHookState()}
+	b.loadHookState()
+	return b
 }
 
 // Handle is called for every message from the transport. It never blocks on the model.

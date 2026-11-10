@@ -645,3 +645,57 @@ func TestOllamaBackupURL(t *testing.T) {
 		t.Errorf("bad url: %v", err)
 	}
 }
+
+func TestConfigFileHints(t *testing.T) {
+	const signal = "transports:\n  signal: {number: \"+1\", allowed_senders: \"+2\"}\n"
+	for name, tc := range map[string]struct{ yml, want string }{
+		// A server indented one level too far ends up inside the one above it.
+		"server inside a server": {signal + "mcp:\n  servers:\n    frigate:\n      url: http://frigate/mcp\n      ha:\n        url: http://ha/mcp\n",
+			`line 7: unknown setting "ha" (it looks like an MCP server: it goes under mcp.servers:, lined up with the other servers)`},
+		"server under mcp": {signal + "mcp:\n  ha:\n    url: http://ha/mcp\n",
+			`line 4: unknown setting "ha" (it looks like an MCP server: it goes under mcp.servers:`},
+		"hook in the wrong place": {signal + "webhooks:\n  door:\n    task: check it\n",
+			`line 4: unknown setting "door" (it looks like a hook: it goes under webhooks.hooks:`},
+		"misspelled setting": {signal + "ollama:\n  modle: llama3\n", `line 4: unknown setting "modle" (did you mean "model"?)`},
+		"misspelled server key": {signal + "mcp:\n  servers:\n    ha:\n      url: http://ha/mcp\n      read_onyl: [x]\n",
+			`line 7: unknown setting "read_onyl" (did you mean "read_only"?)`},
+		"all problems at once": {"transports:\n  signal:\n    numbr: \"+1\"\nhistroy:\n  limit: 5\n",
+			`line 3: unknown setting "numbr" (did you mean "number"?); line 4: unknown setting "histroy" (did you mean "history"?)`},
+		"section for value":    {signal + "ollama:\n  model:\n    name: x\n", "line 5: found a section, want a single value"},
+		"server not a section": {signal + "mcp:\n  servers:\n    ha: http://ha/mcp\n", "mcp.servers.ha: found a value, want a section"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, tc.yml)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v\nwant %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Every setting in the table is reachable from config.yml at its path, and shown by /settings
+// under its variable.
+func TestTableMatchesTheFile(t *testing.T) {
+	seen := map[string]bool{}
+	for _, st := range table {
+		if seen[st.env] {
+			t.Errorf("%s is in the table twice", st.env)
+		}
+		seen[st.env] = true
+		if st.show == nil {
+			t.Errorf("%s: no show", st.env)
+		}
+		if st.path != "" && st.load == nil {
+			t.Errorf("%s: a path but no load", st.env)
+		}
+	}
+	writeConfig(t, "transports:\n  signal: {number: \"+15550000009\", allowed_senders: \"+15550000001\"}\nhistory:\n  limit: 7\nmcp:\n  max_tool_rounds: 3\n  servers:\n    ha: {url: \"http://ha/mcp\"}\n")
+	c, err := Load()
+	if err != nil || c.HistoryLimit != 7 || c.MCPMaxRounds != 3 {
+		t.Fatalf("%v %+v", err, c)
+	}
+	t.Setenv("HISTORY_LIMIT", "1")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HISTORY_LIMIT must be an integer >= 2") {
+		t.Errorf("environment wins and is named: %v", err)
+	}
+}

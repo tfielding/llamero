@@ -7,8 +7,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `llamero -check` (`docker compose run --rm llamero -check`): load the config and try Ollama, its
+  models and the MCP servers without starting the bot, so a mistake shows up before a restart. It
+  lists each server's tools and any names in `tools`, `read_only` or hooks that match nothing,
+  and exits 1 only when the bot couldn't start.
+- Snoozes and the hook runs waiting for `/hooks retry` are saved in `data/hooks.json`, so a
+  restart doesn't unmute everything or lose missed checks.
 - `/hooks retry`: check again the hook events that went out unchecked because Ollama was down or
-  the model failed (the last 20 runs since the bot started). Findings are sent as usual, marked
+  the model failed (the last 20 runs). Findings are sent as usual, marked
   "rechecked"; the one who asked hears about the rest. `/hooks` says when some are waiting.
 - The model is told the current date and time with every message, chats and checks alike, so
   questions about "yesterday" or "this week" don't spend a tool call on the time.
@@ -17,6 +23,9 @@ All notable changes to this project are documented here. The format follows
   used to hide the tool without a word.
 
 ### Changed
+- Config file errors list every problem at once, and unknown keys get a hint: the setting it's
+  probably a misspelling of (`modle` → `model`), or, for an MCP server or hook indented under
+  the wrong section, where it goes.
 - Two servers' tools with the same name only get the server name in front when both are offered.
   A tool one server's `tools` leaves out no longer renames the other (`ha_llm__GetDateTime` is
   `llm__GetDateTime` again). `mcp.tools` still accepts the prefixed name.

@@ -114,6 +114,7 @@ type Box struct {
 	errs     map[string]error // last listing error per server
 	fetched  time.Time
 	hidden   map[string]bool   // tools already logged as hidden
+	problems []string          // names in servers' tools and read_only lists that match nothing, from the last refresh
 	instr    map[string]string // instructions each server sent when we connected
 }
 
@@ -141,6 +142,7 @@ func (b *Box) Tools(ctx context.Context) []Tool {
 	}
 
 	var all []Tool
+	var problems []string
 	errs := map[string]error{}
 	for _, s := range b.servers {
 		lctx, cancel := context.WithTimeout(ctx, listTimeout)
@@ -151,7 +153,7 @@ func (b *Box) Tools(ctx context.Context) []Tool {
 			errs[s.Name] = err
 			continue
 		}
-		b.checkNames(s, ts)
+		problems = append(problems, b.checkNames(s, ts)...)
 		all = append(all, ts...)
 	}
 	// Filter first, so a tool a server's tools: list leaves out doesn't make another server's
@@ -160,9 +162,17 @@ func (b *Box) Tools(ctx context.Context) []Tool {
 	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 
 	b.mu.Lock()
-	b.tools, b.errs, b.fetched = all, errs, time.Now()
+	b.tools, b.errs, b.problems, b.fetched = all, errs, problems, time.Now()
 	b.mu.Unlock()
 	return all
+}
+
+// Problems returns the names in the servers' tools and read_only lists that match none of their
+// tools, as of the last refresh, each with the setting and a close match if there is one.
+func (b *Box) Problems() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.problems)
 }
 
 // Errors returns the servers whose last listing failed.
@@ -588,12 +598,12 @@ func (b *Box) filter(tools []Tool) []Tool {
 	return out
 }
 
-// checkNames logs, once each, names in s's read_only and tools lists that s doesn't have: a
-// misspelled name would otherwise leave a tool out of hooks and schedules (read_only) or out
-// altogether (tools) without a word.
-func (b *Box) checkNames(s Server, ts []Tool) {
+// checkNames returns the names in s's read_only and tools lists that s doesn't have, and logs
+// each the first time: a misspelled name would otherwise leave a tool out of hooks and
+// schedules (read_only) or out altogether (tools) without a word.
+func (b *Box) checkNames(s Server, ts []Tool) []string {
 	if len(s.ReadOnly) == 0 && len(s.Tools) == 0 {
-		return
+		return nil
 	}
 	have := map[string]bool{}
 	names := make([]string, len(ts))
@@ -601,6 +611,7 @@ func (b *Box) checkNames(s Server, ts []Tool) {
 		have[t.remote] = true
 		names[i] = t.remote
 	}
+	var problems []string
 	for _, list := range []struct {
 		setting string
 		names   map[string]bool
@@ -609,6 +620,12 @@ func (b *Box) checkNames(s Server, ts []Tool) {
 			if have[name] {
 				continue
 			}
+			alt := Suggest(name, names)
+			p := fmt.Sprintf("%s: %s lists %s, which the server doesn't have", s.Name, list.setting, name)
+			if alt != "" {
+				p += " (did you mean " + alt + "?)"
+			}
+			problems = append(problems, p)
 			key := list.setting + "/" + s.Name + "/" + name
 			b.mu.Lock()
 			first := !b.hidden[key]
@@ -618,12 +635,13 @@ func (b *Box) checkNames(s Server, ts []Tool) {
 				continue
 			}
 			args := []any{"server", s.Name, "tool", name}
-			if alt := Suggest(name, names); alt != "" {
+			if alt != "" {
 				args = append(args, "did_you_mean", alt)
 			}
 			slog.Warn(list.setting+" lists a tool the server doesn't have", args...)
 		}
 	}
+	return problems
 }
 
 // Suggest is the name in names that name was probably meant to be: the same but for case, the

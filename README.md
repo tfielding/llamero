@@ -222,7 +222,15 @@ Settings come from an optional config file, environment variables, or both.
   file's whole server list.
 - **Checked at startup:** a missing required setting, an invalid value, an unknown key (e.g. a
   typo), an unset `${VAR}` or a missing knowledge file stops llamero with a message naming
-  the setting and its line. The file is read once; restart to apply changes.
+  the setting and its line, every problem in the file at once. Unknown keys come with a hint: the
+  setting it's probably a misspelling of, or, for a server or hook indented under the wrong
+  section, where it goes. The file is read once; restart to apply changes.
+- **Check before restarting:** `llamero -check` (with Docker: `docker compose run --rm llamero
+  -check`) loads the config the same way, then tries what the bot would connect to, without
+  starting it: whether Ollama answers and has the models you named, which tools each MCP server
+  offers, names in `tools`, `read_only` or a hook's `tools` that match nothing, and whether the
+  data folder is writable. It exits 1 only when the bot couldn't start; servers that don't
+  answer are warnings.
 
 | Variable | config.yml | Default | |
 |---|---|---|---|
@@ -460,7 +468,8 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   times, and the busiest keys with how many of each were sent. Like `/hooks`, it's kept in
   memory, so a restart starts it over.
 - `/hooks retry` checks the events that went out unchecked, once Ollama is back: the last 20
-  such runs since the bot started, with their full event text. A check that finds something is
+  such runs, with their full event text. They're saved in `data/hooks.json`, so a restart
+  doesn't lose them. A check that finds something is
   sent as usual, marked "rechecked, events from 10:42"; you're told about the ones with nothing to
   report, and any that still can't be checked stay for another try. Pictures the tools fetch are
   from now, not from when the events happened. A recheck doesn't start a cooldown. `/hooks` says
@@ -469,7 +478,7 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   guests are expected. `/snooze 2h` mutes them all, `/snooze camera_alert 30m` one, and
   `/snooze camera_alert front_door 1h` only that hook's events sent with that `key`. Muted events
   aren't checked when everyone who'd get them has snoozed, so they cost no model time; `/hooks`
-  lists them as skipped. Snoozes are kept in memory, so a restart ends them.
+  lists them as skipped. Snoozes are saved in `data/hooks.json`, so they last through a restart.
 
 **From Home Assistant:** a `rest_command` that any automation can call:
 

@@ -30,13 +30,13 @@ type hookEntry struct {
 func (b *Bot) logHook(hook string, kind hookOutcome, keys []string, event, outcome string, took time.Duration) {
 	e := hookEntry{at: time.Now(), hook: hook, keys: strings.Join(keys, ", "), event: shorten(oneLine(event), hookLogEvent),
 		outcome: outcome, took: took}
-	b.mu.Lock()
+	b.hooks.mu.Lock()
 	b.countHook(hook, kind, keys, strings.TrimPrefix(outcome, "sent unchecked: "), took)
-	b.hookLog = append(b.hookLog, e)
-	if len(b.hookLog) > hookLogSize {
-		b.hookLog = b.hookLog[len(b.hookLog)-hookLogSize:]
+	b.hooks.log = append(b.hooks.log, e)
+	if len(b.hooks.log) > hookLogSize {
+		b.hooks.log = b.hooks.log[len(b.hooks.log)-hookLogSize:]
 	}
-	b.mu.Unlock()
+	b.hooks.mu.Unlock()
 }
 
 // runKeys are a run's event keys, sorted, without the empty one.
@@ -85,11 +85,15 @@ func (b *Bot) hooksCommand(ctx context.Context, sender string, args []string) st
 	case len(args) > 0:
 		return "/hooks shows the latest checks; /hooks stats the totals since the bot started; /hooks retry checks the events that went out unchecked."
 	}
-	b.mu.Lock()
-	log := append([]hookEntry(nil), b.hookLog...)
-	b.mu.Unlock()
+	b.hooks.mu.Lock()
+	log := append([]hookEntry(nil), b.hooks.log...)
+	b.hooks.mu.Unlock()
 	if len(log) == 0 {
-		return "No hook events since the bot started."
+		msg := "No hook events since the bot started."
+		if n := b.missedCount(); n > 0 {
+			msg += fmt.Sprintf("\n%s from before went out unchecked: /hooks retry checks them now.", plural(n, "run"))
+		}
+		return msg
 	}
 	var sb strings.Builder
 	sb.WriteString("Latest hook checks, newest first:\n")

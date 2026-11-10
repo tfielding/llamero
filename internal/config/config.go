@@ -5,24 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/tfielding/llamero/internal/app"
-	"github.com/tfielding/llamero/internal/core"
-	"github.com/tfielding/llamero/internal/knowledge"
 	"github.com/tfielding/llamero/internal/toolbox"
 	"github.com/tfielding/llamero/internal/transport/telegram"
-	"github.com/tfielding/llamero/internal/wol"
 )
 
 const defaultSystemPrompt = "You are a helpful assistant chatting in a messaging app on a phone. " +
@@ -133,99 +128,25 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	s := settings{f}
-	c := Config{
-		ConfigFile:      f.path,
-		OllamaURL:       strings.TrimRight(s.get("OLLAMA_URL", "http://localhost:11434"), "/"),
-		OllamaBackupURL: strings.TrimRight(s.get("OLLAMA_BACKUP_URL", ""), "/"),
-		DefaultModel:    s.get("OLLAMA_MODEL", ""),
-		VisionModel:     s.get("OLLAMA_VISION_MODEL", ""),
-		DataDir:         s.get("DATA_DIR", "/data"),
-		SystemPrompt:    s.get("SYSTEM_PROMPT", defaultSystemPrompt),
-		SummaryModel:    s.get("SUMMARY_MODEL", ""),
-		Reaction:        s.get("REACTION", "👀"),
-		KnowledgeDir:    s.get("KNOWLEDGE_DIR", "/config/knowledge"),
-	}
-	c.DefaultModelAuto = c.DefaultModel == ""
-	switch strings.ToLower(c.Reaction) {
-	case "off", "none", "false":
-		c.Reaction = ""
-	}
-	for _, key := range []string{"SIGNAL_URL", "TELEGRAM_URL", "OLLAMA_URL", "OLLAMA_BACKUP_URL"} {
-		if u, err := url.Parse(s.get(key, "http://x")); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return c, fmt.Errorf("%s must be a URL like http://host:port", s.name(key))
+	c := Config{ConfigFile: f.path}
+	for _, st := range table {
+		if st.load == nil {
+			continue
+		}
+		if err := st.load(&c, s.get(st.env, st.def), s.name(st.env)); err != nil {
+			return c, err
 		}
 	}
-
-	if c.Signal, err = s.signal(); err != nil {
+	// What depends on more than one setting.
+	if err := s.checkTransports(c); err != nil {
 		return c, err
-	}
-	if c.Telegram, err = s.telegram(); err != nil {
-		return c, err
-	}
-	if !c.Signal.On() && !c.Telegram.On() {
-		return c, fmt.Errorf("no messaging app is set up: add transports.signal (number and allowed_senders) or transports.telegram (token and allowed_senders) to %s", s.fileName())
-	}
-
-	if c.HistoryLimit, err = strconv.Atoi(s.get("HISTORY_LIMIT", "40")); err != nil || c.HistoryLimit < 2 {
-		return c, fmt.Errorf("%s must be an integer >= 2", s.name("HISTORY_LIMIT"))
-	}
-	if c.Summarize, err = strconv.ParseBool(s.get("HISTORY_SUMMARY", "true")); err != nil {
-		return c, fmt.Errorf("%s must be true or false", s.name("HISTORY_SUMMARY"))
-	}
-	if c.OllamaTimeout, err = time.ParseDuration(s.get("OLLAMA_TIMEOUT", "5m")); err != nil || c.OllamaTimeout <= 0 {
-		return c, fmt.Errorf("%s must be a duration like 5m", s.name("OLLAMA_TIMEOUT"))
-	}
-
-	if v := s.get("OLLAMA_WOL_MAC", ""); v != "" {
-		if c.WakeMAC, err = wol.ParseMAC(v); err != nil {
-			return c, fmt.Errorf("%s: %w", s.name("OLLAMA_WOL_MAC"), err)
-		}
-	}
-	c.WakeAddr = s.get("OLLAMA_WOL_ADDR", wol.DefaultAddr)
-	if _, _, err := net.SplitHostPort(c.WakeAddr); err != nil {
-		return c, fmt.Errorf("%s must be host:port, e.g. 192.168.1.255:9", s.name("OLLAMA_WOL_ADDR"))
-	}
-	if c.WakeWait, err = time.ParseDuration(s.get("OLLAMA_WOL_WAIT", "60s")); err != nil || c.WakeWait <= 0 {
-		return c, fmt.Errorf("%s must be a duration like 60s", s.name("OLLAMA_WOL_WAIT"))
-	}
-
-	if c.MCPWrite, err = toolbox.ParseWrite(s.get("MCP_ALLOW_WRITE", "false")); err != nil {
-		return c, fmt.Errorf("%s: %w", s.name("MCP_ALLOW_WRITE"), err)
 	}
 	if c.MCPServers, err = s.servers(c.MCPWrite); err != nil {
 		return c, err
 	}
-	c.MCPTools = map[string]bool{}
-	for _, t := range strings.Split(s.get("MCP_TOOLS", ""), ",") {
-		if t = strings.TrimSpace(t); t != "" {
-			c.MCPTools[t] = true
-		}
-	}
-	switch v := s.get("HEALTH_ADDR", ":8092"); strings.ToLower(v) {
-	case "off", "none", "false":
-	default:
-		host, port, err := net.SplitHostPort(v)
-		if n, perr := strconv.Atoi(port); err != nil || perr != nil || n < 1 || n > 65535 {
-			return c, fmt.Errorf("%s must be [host]:port like :8092, or off", s.name("HEALTH_ADDR"))
-		}
-		c.HealthAddr = net.JoinHostPort(host, port)
-	}
-	if c.Schedules, err = strconv.ParseBool(s.get("SCHEDULES", "true")); err != nil {
-		return c, fmt.Errorf("%s must be true or false", s.name("SCHEDULES"))
-	}
-	if c.KnowledgeMaxChars, err = strconv.Atoi(s.get("KNOWLEDGE_MAX_CHARS", strconv.Itoa(knowledge.DefaultMaxChars))); err != nil || c.KnowledgeMaxChars < 500 {
-		return c, fmt.Errorf("%s must be an integer >= 500", s.name("KNOWLEDGE_MAX_CHARS"))
-	}
-	if c.MCPMaxChars, err = strconv.Atoi(s.get("MCP_MAX_RESULT_CHARS", strconv.Itoa(toolbox.DefaultMaxResultChars))); err != nil || c.MCPMaxChars < 1000 {
-		return c, fmt.Errorf("%s must be an integer >= 1000", s.name("MCP_MAX_RESULT_CHARS"))
-	}
-	if c.MCPMaxRounds, err = strconv.Atoi(s.get("MCP_MAX_TOOL_ROUNDS", strconv.Itoa(core.DefaultMaxToolRounds))); err != nil || c.MCPMaxRounds < 1 || c.MCPMaxRounds > 50 {
-		return c, fmt.Errorf("%s must be an integer from 1 to 50", s.name("MCP_MAX_TOOL_ROUNDS"))
-	}
 	if c.Hooks, err = s.hooks(c); err != nil {
 		return c, err
 	}
-	c.WebhookToken = s.get("WEBHOOK_TOKEN", "")
 	if len(c.Hooks) > 0 {
 		switch {
 		case c.HealthAddr == "":
@@ -239,50 +160,30 @@ func Load() (Config, error) {
 	return c, nil
 }
 
-// signal returns the Signal transport's settings, if it's set up (a number or senders given).
-func (s settings) signal() (Signal, error) {
-	sig := Signal{URL: strings.TrimRight(s.get("SIGNAL_URL", "http://signal-cli-rest-api:8080"), "/"), Number: s.get("SIGNAL_NUMBER", ""),
-		Allowed: map[string]bool{}}
-	for _, v := range strings.Split(s.get("SIGNAL_ALLOWED_SENDERS", ""), ",") {
-		if v = strings.TrimPrefix(strings.TrimSpace(v), signalPrefix); v != "" {
-			sig.Allowed[v] = true
-		}
-	}
+// checkTransports checks that at least one messaging app is set up, and each one completely:
+// giving any of its settings means it's meant to be used.
+func (s settings) checkTransports(c Config) error {
+	sig, tg := c.Signal, c.Telegram
 	switch {
 	case sig.Number == "" && len(sig.Allowed) == 0:
-		return Signal{}, nil // not set up
 	case sig.Number == "":
-		return sig, fmt.Errorf("%s is required (the number registered in signal-cli-rest-api)", s.missing("SIGNAL_NUMBER"))
+		return fmt.Errorf("%s is required (the number registered in signal-cli-rest-api)", s.missing("SIGNAL_NUMBER"))
 	case len(sig.Allowed) == 0:
-		return sig, fmt.Errorf("%s is required (phone numbers allowed to use the bot)", s.missing("SIGNAL_ALLOWED_SENDERS"))
-	}
-	return sig, nil
-}
-
-// telegram returns the Telegram transport's settings, if it's set up (a token or senders given).
-func (s settings) telegram() (Telegram, error) {
-	tg := Telegram{URL: strings.TrimRight(s.get("TELEGRAM_URL", telegram.DefaultURL), "/"), Token: s.get("TELEGRAM_TOKEN", ""),
-		Allowed: map[string]bool{}}
-	for _, v := range strings.Split(s.get("TELEGRAM_ALLOWED_SENDERS", ""), ",") {
-		if v = strings.TrimPrefix(strings.TrimSpace(v), telegram.Prefix+":"); v == "" {
-			continue
-		}
-		if id, err := strconv.ParseInt(v, 10, 64); err != nil || id <= 0 {
-			return tg, fmt.Errorf("%s: %q is not a Telegram user id (a number; the bot logs it when someone not allowed messages it)", s.name("TELEGRAM_ALLOWED_SENDERS"), v)
-		}
-		tg.Allowed[v] = true
+		return fmt.Errorf("%s is required (phone numbers allowed to use the bot)", s.missing("SIGNAL_ALLOWED_SENDERS"))
 	}
 	switch {
 	case tg.Token == "" && len(tg.Allowed) == 0:
-		return Telegram{}, nil // not set up
 	case tg.Token == "":
-		return tg, fmt.Errorf("%s is required (the bot token from @BotFather)", s.missing("TELEGRAM_TOKEN"))
+		return fmt.Errorf("%s is required (the bot token from @BotFather)", s.missing("TELEGRAM_TOKEN"))
 	case !telegramToken.MatchString(tg.Token):
-		return tg, fmt.Errorf("%s doesn't look like a bot token (123456:ABC-...)", s.name("TELEGRAM_TOKEN"))
+		return fmt.Errorf("%s doesn't look like a bot token (123456:ABC-...)", s.name("TELEGRAM_TOKEN"))
 	case len(tg.Allowed) == 0:
-		return tg, fmt.Errorf("%s is required (Telegram user ids allowed to use the bot)", s.missing("TELEGRAM_ALLOWED_SENDERS"))
+		return fmt.Errorf("%s is required (Telegram user ids allowed to use the bot)", s.missing("TELEGRAM_ALLOWED_SENDERS"))
 	}
-	return tg, nil
+	if !sig.On() && !tg.On() {
+		return fmt.Errorf("no messaging app is set up: add transports.signal (number and allowed_senders) or transports.telegram (token and allowed_senders) to %s", s.fileName())
+	}
+	return nil
 }
 
 var telegramToken = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]+$`)
@@ -408,7 +309,7 @@ func (s settings) get(key, def string) string {
 func (s settings) name(key string) string {
 	if strings.TrimSpace(os.Getenv(key)) == "" {
 		if _, ok := s.f.values[key]; ok {
-			return fileKeys[key] + " in " + s.f.path
+			return pathOf(key) + " in " + s.f.path
 		}
 	}
 	return key
@@ -485,9 +386,15 @@ func (s settings) fileName() string {
 // missing is how to refer to a required setting that wasn't given anywhere.
 func (s settings) missing(key string) string {
 	if s.f.path != "" {
-		return fileKeys[key] + " in " + s.f.path + " (or " + key + ")"
+		return pathOf(key) + " in " + s.f.path + " (or " + key + ")"
 	}
 	return key
+}
+
+// pathOf is a setting's place in config.yml.
+func pathOf(env string) string {
+	st, _ := lookup(env)
+	return st.path
 }
 
 // servers returns the MCP servers: from MCP_SERVERS if set (which replaces the file's list),
@@ -558,168 +465,12 @@ func (s settings) servers(def toolbox.Write) ([]toolbox.Server, error) {
 // Secrets are never shown: tokens appear only as "set", phone numbers are masked
 // and credentials and query strings in URLs are removed.
 func (c Config) Describe() string {
-	model := c.DefaultModel
-	if c.DefaultModelAuto {
-		model += " (first installed model)"
-	}
-	masked := func(ids map[string]bool) string {
-		out := make([]string, 0, len(ids))
-		for id := range ids {
-			out = append(out, mask(id))
-		}
-		sort.Strings(out)
-		return strings.Join(out, ", ")
-	}
-	prompt := "default"
-	if c.SystemPrompt != defaultSystemPrompt {
-		prompt = fmt.Sprintf("custom (%d characters)", len(c.SystemPrompt))
-	}
-	summaryModel := c.SummaryModel
-	if summaryModel == "" {
-		summaryModel = "the chat's model"
-	}
-
 	var sb strings.Builder
-	line := func(k string, v any) { fmt.Fprintf(&sb, "%s: %v\n", k, v) }
-	if c.ConfigFile == "" {
-		line("CONFIG_FILE", "none (environment variables only)")
-	} else {
-		line("CONFIG_FILE", c.ConfigFile)
-	}
-	if c.Signal.On() {
-		line("SIGNAL_URL", safeURL(c.Signal.URL))
-		line("SIGNAL_NUMBER", mask(c.Signal.Number))
-		line("SIGNAL_ALLOWED_SENDERS", masked(c.Signal.Allowed))
-	}
-	if c.Telegram.On() {
-		line("TELEGRAM_URL", safeURL(c.Telegram.URL))
-		line("TELEGRAM_TOKEN", "set")
-		line("TELEGRAM_ALLOWED_SENDERS", masked(c.Telegram.Allowed))
-	}
-	line("OLLAMA_URL", safeURL(c.OllamaURL))
-	if c.OllamaBackupURL != "" {
-		line("OLLAMA_BACKUP_URL", safeURL(c.OllamaBackupURL))
-	}
-	line("OLLAMA_MODEL", model)
-	vision := c.VisionModel
-	if vision == "" {
-		vision = "not set (photos need a chat model that can see)"
-	}
-	line("OLLAMA_VISION_MODEL", vision)
-	line("OLLAMA_TIMEOUT", c.OllamaTimeout)
-	if c.WakeMAC == nil {
-		line("OLLAMA_WOL_MAC", "not set (Wake-on-LAN off)")
-	} else {
-		line("OLLAMA_WOL_MAC", c.WakeMAC)
-		line("OLLAMA_WOL_ADDR", c.WakeAddr)
-		line("OLLAMA_WOL_WAIT", c.WakeWait)
-	}
-	line("HISTORY_LIMIT", c.HistoryLimit)
-	line("HISTORY_SUMMARY", c.Summarize)
-	line("SUMMARY_MODEL", summaryModel)
-	line("SYSTEM_PROMPT", prompt)
-	reaction := c.Reaction
-	if reaction == "" {
-		reaction = "off"
-	}
-	line("REACTION", reaction)
-	line("DATA_DIR", c.DataDir)
-	line("SCHEDULES", c.Schedules)
-	health := c.HealthAddr
-	if health == "" {
-		health = "off"
-	}
-	line("HEALTH_ADDR", health)
-	line("TZ", time.Local.String())
-	line("KNOWLEDGE_DIR", c.KnowledgeDir)
-	line("KNOWLEDGE_MAX_CHARS", c.KnowledgeMaxChars)
-	if len(c.MCPServers) == 0 {
-		line("MCP_SERVERS", "none")
-	}
-	for _, s := range c.MCPServers {
-		extra := []string{}
-		if s.Token != "" {
-			extra = append(extra, "token set")
+	fmt.Fprintf(&sb, "CONFIG_FILE: %s\n", or(c.ConfigFile, "none (environment variables only)"))
+	for _, st := range table {
+		for _, v := range st.show(c) {
+			fmt.Fprintf(&sb, "%s: %s\n", st.env, v)
 		}
-		if s.Knowledge != "" {
-			extra = append(extra, "knowledge "+s.Knowledge)
-		}
-		if s.Write != c.MCPWrite {
-			extra = append(extra, "allow_write "+s.Write.String())
-		}
-		if len(s.Tools) > 0 {
-			names := make([]string, 0, len(s.Tools))
-			for t := range s.Tools {
-				names = append(names, t)
-			}
-			sort.Strings(names)
-			extra = append(extra, "tools "+strings.Join(names, " "))
-		}
-		if len(s.ReadOnly) > 0 {
-			extra = append(extra, "read_only "+strings.Join(slices.Sorted(maps.Keys(s.ReadOnly)), " "))
-		}
-		v := s.Name + "=" + safeURL(s.URL)
-		if len(extra) > 0 {
-			v += " (" + strings.Join(extra, ", ") + ")"
-		}
-		line("MCP_SERVERS", v)
-	}
-	if len(c.MCPServers) > 0 {
-		tools := "all"
-		if len(c.MCPTools) > 0 {
-			names := make([]string, 0, len(c.MCPTools))
-			for t := range c.MCPTools {
-				names = append(names, t)
-			}
-			sort.Strings(names)
-			tools = strings.Join(names, ", ")
-		}
-		line("MCP_TOOLS", tools)
-		line("MCP_ALLOW_WRITE", c.MCPWrite)
-		line("MCP_MAX_RESULT_CHARS", c.MCPMaxChars)
-		line("MCP_MAX_TOOL_ROUNDS", c.MCPMaxRounds)
-	}
-	if len(c.Hooks) > 0 {
-		line("WEBHOOK_TOKEN", "set")
-	}
-	for _, h := range c.Hooks {
-		parts := []string{"sends events on unchecked"}
-		if h.Task != "" {
-			parts = []string{"task: " + h.Task}
-		}
-		if h.OnlyIf != "" {
-			parts = append(parts, "only if: "+h.OnlyIf)
-		}
-		if len(h.To)+len(h.Groups) > 0 {
-			var to []string
-			for _, r := range h.To {
-				to = append(to, mask(r))
-			}
-			for _, g := range h.Groups {
-				to = append(to, "group "+mask(g))
-			}
-			parts = append(parts, "to "+strings.Join(to, " "))
-		}
-		if h.Wake {
-			parts = append(parts, "wakes Ollama")
-		}
-		if h.Model != "" {
-			parts = append(parts, "model "+h.Model)
-		}
-		if h.Think != "" {
-			parts = append(parts, "think "+h.Think)
-		}
-		if len(h.Tools) > 0 {
-			parts = append(parts, "tools "+strings.Join(h.Tools, ", "))
-		}
-		if h.Title != "" {
-			parts = append(parts, "title "+h.Title)
-		}
-		parts = append(parts, "group "+h.Group.String())
-		if h.Cooldown > 0 {
-			parts = append(parts, "cooldown "+h.Cooldown.String())
-		}
-		line("HOOK", "/hooks/"+h.Name+" ("+strings.Join(parts, "; ")+")")
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
 }

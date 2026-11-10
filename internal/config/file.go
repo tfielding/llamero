@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
+	"maps"
 	"os"
+	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/tfielding/llamero/internal/toolbox"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -19,64 +22,6 @@ const DefaultFile = "/config/config.yml"
 
 // defaultFile is DefaultFile; tests point it elsewhere.
 var defaultFile = DefaultFile
-
-// fileConfig is the layout of config.yml. Every setting can also be set by its environment
-// variable (see fileKeys), which wins over the file.
-type fileConfig struct {
-	Transports struct {
-		Signal struct {
-			URL            string     `yaml:"url"`
-			Number         string     `yaml:"number"`
-			AllowedSenders stringList `yaml:"allowed_senders"`
-		} `yaml:"signal"`
-		Telegram struct {
-			URL            string     `yaml:"url"`
-			Token          string     `yaml:"token"`
-			AllowedSenders stringList `yaml:"allowed_senders"`
-		} `yaml:"telegram"`
-	} `yaml:"transports"` // the messaging apps the bot talks on
-	Ollama struct {
-		URL         string `yaml:"url"`
-		BackupURL   string `yaml:"backup_url"`
-		Model       string `yaml:"model"`
-		VisionModel string `yaml:"vision_model"`
-		Timeout     string `yaml:"timeout"`
-		WakeOnLAN   struct {
-			MAC  string `yaml:"mac"`
-			Addr string `yaml:"addr"`
-			Wait string `yaml:"wait"`
-		} `yaml:"wake_on_lan"`
-	} `yaml:"ollama"`
-	History struct {
-		Limit        string `yaml:"limit"`
-		Summary      string `yaml:"summary"`
-		SummaryModel string `yaml:"summary_model"`
-	} `yaml:"history"`
-	SystemPrompt string `yaml:"system_prompt"`
-	Reaction     string `yaml:"reaction"`
-	DataDir      string `yaml:"data_dir"`
-	Schedules    struct {
-		Enabled string `yaml:"enabled"`
-	} `yaml:"schedules"`
-	Health struct {
-		Addr string `yaml:"addr"`
-	} `yaml:"health"`
-	Knowledge struct {
-		Dir      string `yaml:"dir"`
-		MaxChars string `yaml:"max_chars"`
-	} `yaml:"knowledge"`
-	Webhooks struct {
-		Token string              `yaml:"token"`
-		Hooks map[string]fileHook `yaml:"hooks"`
-	} `yaml:"webhooks"`
-	MCP struct {
-		AllowWrite     string                `yaml:"allow_write"`
-		Tools          stringList            `yaml:"tools"`
-		MaxResultChars string                `yaml:"max_result_chars"`
-		MaxToolRounds  string                `yaml:"max_tool_rounds"`
-		Servers        map[string]fileServer `yaml:"servers"`
-	} `yaml:"mcp"`
-}
 
 // fileHook is one hook under webhooks.hooks.
 type fileHook struct {
@@ -99,39 +44,6 @@ type fileServer struct {
 	Tools      stringList `yaml:"tools"`
 	ReadOnly   stringList `yaml:"read_only"`
 	Knowledge  string     `yaml:"knowledge"`
-}
-
-// fileKeys maps each environment variable to its place in config.yml, for error messages.
-var fileKeys = map[string]string{
-	"SIGNAL_URL":               "transports.signal.url",
-	"SIGNAL_NUMBER":            "transports.signal.number",
-	"SIGNAL_ALLOWED_SENDERS":   "transports.signal.allowed_senders",
-	"TELEGRAM_URL":             "transports.telegram.url",
-	"TELEGRAM_TOKEN":           "transports.telegram.token",
-	"TELEGRAM_ALLOWED_SENDERS": "transports.telegram.allowed_senders",
-	"OLLAMA_URL":               "ollama.url",
-	"OLLAMA_BACKUP_URL":        "ollama.backup_url",
-	"OLLAMA_MODEL":             "ollama.model",
-	"OLLAMA_VISION_MODEL":      "ollama.vision_model",
-	"OLLAMA_TIMEOUT":           "ollama.timeout",
-	"OLLAMA_WOL_MAC":           "ollama.wake_on_lan.mac",
-	"OLLAMA_WOL_ADDR":          "ollama.wake_on_lan.addr",
-	"OLLAMA_WOL_WAIT":          "ollama.wake_on_lan.wait",
-	"HISTORY_LIMIT":            "history.limit",
-	"HISTORY_SUMMARY":          "history.summary",
-	"SUMMARY_MODEL":            "history.summary_model",
-	"SYSTEM_PROMPT":            "system_prompt",
-	"REACTION":                 "reaction",
-	"DATA_DIR":                 "data_dir",
-	"SCHEDULES":                "schedules.enabled",
-	"HEALTH_ADDR":              "health.addr",
-	"KNOWLEDGE_DIR":            "knowledge.dir",
-	"KNOWLEDGE_MAX_CHARS":      "knowledge.max_chars",
-	"MCP_ALLOW_WRITE":          "mcp.allow_write",
-	"MCP_TOOLS":                "mcp.tools",
-	"MCP_MAX_RESULT_CHARS":     "mcp.max_result_chars",
-	"MCP_MAX_TOOL_ROUNDS":      "mcp.max_tool_rounds",
-	"WEBHOOK_TOKEN":            "webhooks.token",
 }
 
 // file is a loaded config.yml: settings by environment variable name, and the MCP servers.
@@ -182,48 +94,11 @@ func loadFile(path string) (file, error) {
 	if err != nil {
 		return file{}, fmt.Errorf("config file: %w", err)
 	}
-	fc, err := parseFile(data)
+	f, err := parseFile(data)
 	if err != nil {
 		return file{}, fmt.Errorf("%s: %w", path, err)
 	}
-	f := file{path: path, servers: fc.MCP.Servers, hooks: fc.Webhooks.Hooks, values: map[string]string{
-		"SIGNAL_URL":               fc.Transports.Signal.URL,
-		"SIGNAL_NUMBER":            fc.Transports.Signal.Number,
-		"SIGNAL_ALLOWED_SENDERS":   strings.Join(fc.Transports.Signal.AllowedSenders, ","),
-		"TELEGRAM_URL":             fc.Transports.Telegram.URL,
-		"TELEGRAM_TOKEN":           fc.Transports.Telegram.Token,
-		"TELEGRAM_ALLOWED_SENDERS": strings.Join(fc.Transports.Telegram.AllowedSenders, ","),
-		"OLLAMA_URL":               fc.Ollama.URL,
-		"OLLAMA_BACKUP_URL":        fc.Ollama.BackupURL,
-		"OLLAMA_MODEL":             fc.Ollama.Model,
-		"OLLAMA_VISION_MODEL":      fc.Ollama.VisionModel,
-		"OLLAMA_TIMEOUT":           fc.Ollama.Timeout,
-		"OLLAMA_WOL_MAC":           fc.Ollama.WakeOnLAN.MAC,
-		"OLLAMA_WOL_ADDR":          fc.Ollama.WakeOnLAN.Addr,
-		"OLLAMA_WOL_WAIT":          fc.Ollama.WakeOnLAN.Wait,
-		"HISTORY_LIMIT":            fc.History.Limit,
-		"HISTORY_SUMMARY":          fc.History.Summary,
-		"SUMMARY_MODEL":            fc.History.SummaryModel,
-		"SYSTEM_PROMPT":            fc.SystemPrompt,
-		"REACTION":                 fc.Reaction,
-		"DATA_DIR":                 fc.DataDir,
-		"SCHEDULES":                fc.Schedules.Enabled,
-		"HEALTH_ADDR":              fc.Health.Addr,
-		"KNOWLEDGE_DIR":            fc.Knowledge.Dir,
-		"KNOWLEDGE_MAX_CHARS":      fc.Knowledge.MaxChars,
-		"MCP_ALLOW_WRITE":          fc.MCP.AllowWrite,
-		"MCP_TOOLS":                strings.Join(fc.MCP.Tools, ","),
-		"MCP_MAX_RESULT_CHARS":     fc.MCP.MaxResultChars,
-		"MCP_MAX_TOOL_ROUNDS":      fc.MCP.MaxToolRounds,
-		"WEBHOOK_TOKEN":            fc.Webhooks.Token,
-	}}
-	for k, v := range f.values {
-		if v = strings.TrimSpace(v); v == "" {
-			delete(f.values, k)
-		} else {
-			f.values[k] = v
-		}
-	}
+	f.path = path
 	return f, nil
 }
 
@@ -259,26 +134,80 @@ func readable(te *yaml.TypeError) error {
 
 var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-// parseFile decodes strictly (unknown keys are errors, with the line in the file), then fills
-// in ${VAR} from the environment in every value, so secrets can stay in .env.
-func parseFile(data []byte) (fileConfig, error) {
-	var fc fileConfig
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&fc); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty file
-		var te *yaml.TypeError
-		if errors.As(err, &te) {
-			return fc, readable(te)
-		}
+// parseFile reads config.yml: the settings in the table by their place in it, and the MCP servers
+// and hooks. Unknown keys and values of the wrong kind are errors with their line, all at once.
+// ${VAR} in any value is filled in from the environment, so secrets can stay in .env.
+func parseFile(data []byte) (file, error) {
+	f := file{values: map[string]string{}}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
 		if bytes.Contains(data, []byte("${")) && strings.Contains(err.Error(), "did not find expected") {
 			err = fmt.Errorf("%w (inside { } or [ ], put ${VAR} in quotes: \"${VAR}\")", err)
 		}
-		return fc, err
+		return f, err
 	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil || root.Kind == 0 {
-		return fc, err
+	if root.Kind == 0 || len(root.Content) == 0 { // empty, or only comments
+		return f, nil
 	}
+	doc := root.Content[0]
+	if doc.Kind == yaml.ScalarNode && doc.Tag == "!!null" {
+		return f, nil
+	}
+	var problems []string
+	checkSection(doc, "", &problems)
+	if len(problems) > 0 {
+		return f, errors.New(strings.Join(problems, "; "))
+	}
+	if err := expandEnv(doc); err != nil {
+		return f, err
+	}
+	for _, st := range table {
+		if st.path == "" {
+			continue
+		}
+		n := at(doc, st.path)
+		if n == nil {
+			continue
+		}
+		var v string
+		if n.Kind == yaml.SequenceNode {
+			var items stringList
+			if err := n.Decode(&items); err != nil {
+				return f, err
+			}
+			v = strings.Join(items, ",")
+		} else if n.Tag != "!!null" {
+			v = n.Value
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			f.values[st.env] = v
+		}
+	}
+	if n := at(doc, "mcp.servers"); n != nil {
+		if err := decode(n, &f.servers); err != nil {
+			return f, err
+		}
+	}
+	if n := at(doc, "webhooks.hooks"); n != nil {
+		if err := decode(n, &f.hooks); err != nil {
+			return f, err
+		}
+	}
+	return f, nil
+}
+
+// decode decodes n into v, with the decoder's errors made readable.
+func decode(n *yaml.Node, v any) error {
+	err := n.Decode(v)
+	var te *yaml.TypeError
+	if errors.As(err, &te) {
+		return readable(te)
+	}
+	return err
+}
+
+// expandEnv fills in ${VAR} in every value from the environment.
+func expandEnv(doc *yaml.Node) error {
 	var missing []string
 	var walk func(n *yaml.Node)
 	walk = func(n *yaml.Node) {
@@ -297,11 +226,170 @@ func parseFile(data []byte) (fileConfig, error) {
 			walk(c)
 		}
 	}
-	walk(&root)
+	walk(doc)
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fc, fmt.Errorf("not set in the environment: %s", strings.Join(missing, ", "))
+		return fmt.Errorf("not set in the environment: %s", strings.Join(missing, ", "))
 	}
-	fc = fileConfig{}
-	return fc, root.Decode(&fc)
+	return nil
+}
+
+// at is the node at a dotted path under n, or nil.
+func at(n *yaml.Node, path string) *yaml.Node {
+	for _, key := range strings.Split(path, ".") {
+		if n == nil || n.Kind != yaml.MappingNode {
+			return nil
+		}
+		var next *yaml.Node
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if n.Content[i].Value == key {
+				next = n.Content[i+1]
+			}
+		}
+		n = next
+	}
+	return n
+}
+
+// The layout of config.yml: the sections and settings in the table, plus the MCP servers and
+// hooks, which are named by the user and have their own keys.
+var (
+	serverKeys = yamlKeys(fileServer{})
+	hookKeys   = yamlKeys(fileHook{})
+)
+
+// named are the sections whose keys are names the user picks, with the keys each entry takes.
+var named = map[string][]string{"mcp.servers": serverKeys, "webhooks.hooks": hookKeys}
+
+// children is what may be under the section at path ("" = the top), and whether each is a
+// setting (true) or a section (false).
+func children(path string) map[string]bool {
+	out := map[string]bool{}
+	prefix := ""
+	if path != "" {
+		prefix = path + "."
+	}
+	for _, st := range table {
+		if st.path == "" || !strings.HasPrefix(st.path, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(st.path, prefix)
+		first, _, deeper := strings.Cut(rest, ".")
+		out[first] = out[first] || !deeper
+	}
+	for p := range named {
+		if strings.HasPrefix(p, prefix) {
+			first, _, _ := strings.Cut(strings.TrimPrefix(p, prefix), ".")
+			if _, ok := out[first]; !ok {
+				out[first] = false
+			}
+		}
+	}
+	return out
+}
+
+// checkSection checks the keys under a section, and what's under them, adding a line for each
+// problem.
+func checkSection(n *yaml.Node, path string, problems *[]string) {
+	if keys, ok := named[path]; ok {
+		checkNamed(n, path, keys, problems)
+		return
+	}
+	if n.Kind != yaml.MappingNode {
+		*problems = append(*problems, fmt.Sprintf("line %d: found a %s, want a section with settings under it", n.Line, kind(n)))
+		return
+	}
+	known := children(path)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, val := n.Content[i], n.Content[i+1]
+		setting, ok := known[key.Value]
+		full := key.Value
+		if path != "" {
+			full = path + "." + key.Value
+		}
+		switch {
+		case !ok:
+			*problems = append(*problems, unknown(key, val, path, slices.Collect(maps.Keys(known))))
+		case !setting:
+			if val.Kind == yaml.ScalarNode && val.Tag == "!!null" { // an empty section
+				continue
+			}
+			checkSection(val, full, problems)
+		case val.Kind == yaml.MappingNode, val.Kind == yaml.SequenceNode && !isList(full):
+			*problems = append(*problems, fmt.Sprintf("line %d: found a %s, want a single value", val.Line, kind(val)))
+		}
+	}
+}
+
+// checkNamed checks a section of named entries (MCP servers, hooks): each a section of keys.
+func checkNamed(n *yaml.Node, path string, keys []string, problems *[]string) {
+	if n.Kind == yaml.ScalarNode && n.Tag == "!!null" {
+		return
+	}
+	if n.Kind != yaml.MappingNode {
+		*problems = append(*problems, fmt.Sprintf("line %d: found a %s, want a section with settings under it", n.Line, kind(n)))
+		return
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		name, entry := n.Content[i], n.Content[i+1]
+		if entry.Kind != yaml.MappingNode {
+			*problems = append(*problems, fmt.Sprintf("line %d: %s.%s: found a %s, want a section with settings under it", entry.Line, path, name.Value, kind(entry)))
+			continue
+		}
+		for j := 0; j+1 < len(entry.Content); j += 2 {
+			key, val := entry.Content[j], entry.Content[j+1]
+			if !slices.Contains(keys, key.Value) {
+				*problems = append(*problems, unknown(key, val, path+"."+name.Value, keys))
+			}
+		}
+	}
+}
+
+// unknown describes a key that doesn't belong where it is, with a hint: where it probably goes
+// (judging by what's under it), or the setting it's probably a misspelling of.
+func unknown(key, val *yaml.Node, path string, known []string) string {
+	msg := fmt.Sprintf("line %d: unknown setting %q", key.Line, key.Value)
+	has := func(k string) bool { return val.Kind == yaml.MappingNode && at(val, k) != nil }
+	switch {
+	case path == "" && (key.Value == "signal" || key.Value == "telegram"):
+		return msg + " (it goes under transports:)"
+	case has("url") && path != "mcp.servers" && !strings.HasPrefix(path, "transports"):
+		return msg + " (it looks like an MCP server: it goes under mcp.servers:, lined up with the other servers)"
+	case (has("task") || has("only_if")) && path != "webhooks.hooks":
+		return msg + " (it looks like a hook: it goes under webhooks.hooks:, lined up with the other hooks)"
+	}
+	if alt := toolbox.Suggest(key.Value, known); alt != "" && alt != key.Value {
+		return msg + fmt.Sprintf(" (did you mean %q?)", alt)
+	}
+	return msg + " (check the spelling and indentation)"
+}
+
+func isList(path string) bool {
+	for _, st := range table {
+		if st.path == path {
+			return st.list
+		}
+	}
+	return false
+}
+
+func kind(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.SequenceNode:
+		return "list"
+	case yaml.MappingNode:
+		return "section"
+	}
+	return "value"
+}
+
+// yamlKeys is the yaml names of v's fields.
+func yamlKeys(v any) []string {
+	t := reflect.TypeOf(v)
+	out := make([]string, 0, t.NumField())
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("yaml"), ",")
+		out = append(out, name)
+	}
+	return out
 }

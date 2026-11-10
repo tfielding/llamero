@@ -41,8 +41,9 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "check the running bot's /healthz and exit 0 if it's healthy (for Docker)")
+	check := flag.Bool("check", false, "check the configuration and try Ollama and the MCP servers, then exit (1 if the bot couldn't start)")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-version] [-healthcheck]\n\nConfigured with environment variables and /config/config.yml; see the README.\n", app.Name)
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [-version] [-healthcheck] [-check]\n\nConfigured with environment variables and /config/config.yml; see the README.\n", app.Name)
 	}
 	flag.Parse()
 	if *showVersion {
@@ -51,6 +52,10 @@ func main() {
 	}
 	if *healthcheck {
 		os.Exit(checkHealth())
+	}
+	if *check {
+		slog.SetDefault(slog.New(slog.DiscardHandler)) // the report says it all
+		os.Exit(runCheck(os.Stdout))
 	}
 	if err := run(); err != nil {
 		slog.Error("fatal", "err", err)
@@ -148,6 +153,7 @@ func run() error {
 	b := core.New(router, llm, st, core.Options{
 		Tools:         tools,
 		MaxToolRounds: cfg.MCPMaxRounds,
+		HookStateFile: filepath.Join(cfg.DataDir, "hooks.json"),
 		Knowledge:     know,
 		Schedules:     schedules,
 		Hooks:         botHooks(cfg.Hooks),

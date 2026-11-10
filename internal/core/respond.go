@@ -286,152 +286,203 @@ func (b *Bot) unanswered(sender, text string, r response) response {
 func (b *Bot) run(ctx context.Context, sender, model string, msgs []ollama.Message, think any,
 	tools []toolbox.Tool, vision bool) (string, []toolbox.Image, ollama.Stats, error) {
 
-	defs := make([]ollama.Tool, len(tools))
+	r := &toolRun{b: b, sender: sender, tools: tools, vision: vision, msgs: msgs}
+	r.defs = make([]ollama.Tool, len(tools))
 	for i, t := range tools {
-		defs[i] = ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: t.Name, Description: t.Description, Parameters: t.Schema}}
+		r.defs[i] = ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: t.Name, Description: t.Description, Parameters: t.Schema}}
 	}
-	var images []toolbox.Image
-	var stats ollama.Stats
-	failures := 0
-	nudged := false   // asked once for an answer after the model wrote none
-	lastFailure := "" // error from the previous tool call, shown if the next one needs approval
-	declines := 0
-	toolsOver := false // the user declined twice or didn't answer: no more tool calls
 	for round := 0; ; round++ {
-		if round == b.opt.MaxToolRounds || failures >= maxToolFailures || toolsOver {
-			if len(defs) > 0 {
-				slog.Warn("no more tool calls for this message, asking for a final answer", "rounds", round, "failures", failures)
-				msgs = append(msgs, ollama.Message{Role: "system", Content: "Tool use is over for this message. " +
-					"Answer now with what you have. If the tools failed, say so plainly; do not guess values."})
-			}
-			defs = nil // force a final answer
-		}
-		res, err := b.llm.Chat(ctx, model, msgs, think, defs)
+		r.limit(round)
+		res, err := b.llm.Chat(ctx, model, r.msgs, think, r.defs)
 		if err != nil {
-			return "", nil, stats, err
+			return "", nil, r.stats, err
 		}
-		stats.Add(res.Stats)
-		if len(res.ToolCalls) == 0 || len(defs) == 0 {
-			if strings.TrimSpace(res.Content) == "" && len(images) == 0 {
-				if round > 0 && !nudged {
-					// Some models stop after their tool calls without writing anything: ask once more.
-					slog.Warn("model wrote no answer after using tools, asking again", "rounds", round)
-					nudged, defs = true, nil
-					msgs = append(msgs, ollama.Message{Role: "system", Content: "You used tools but wrote no answer. " +
-						"Answer now, in words, with what the tools returned. If they found nothing, say so."})
-					continue
-				}
-				return "", nil, stats, noAnswer{failures: failures, rounds: round}
+		r.stats.Add(res.Stats)
+		if len(res.ToolCalls) == 0 || len(r.defs) == 0 {
+			if strings.TrimSpace(res.Content) != "" || len(r.images) > 0 {
+				return res.Content, r.images, r.stats, nil
 			}
-			return res.Content, images, stats, nil
+			if round > 0 && !r.nudged {
+				r.nudge(round)
+				continue
+			}
+			return "", nil, r.stats, noAnswer{failures: r.failures, rounds: round}
 		}
-
-		msgs = append(msgs, ollama.Message{Role: "assistant", Content: res.Content, Thinking: res.Thinking, ToolCalls: res.ToolCalls})
+		r.msgs = append(r.msgs, ollama.Message{Role: "assistant", Content: res.Content, Thinking: res.Thinking, ToolCalls: res.ToolCalls})
 		for _, tc := range res.ToolCalls {
-			name := tc.Function.Name
-			if toolsOver {
-				msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: "Not run: no more actions for this message."})
-				continue
+			if err := r.call(ctx, tc.Function.Name, tc.Function.Arguments); err != nil {
+				return "", nil, r.stats, err
 			}
-			// Small models invent tool names. Don't ask the user to approve something that
-			// can't run: tell the model what exists so it can correct the name.
-			if _, ok := findTool(tools, name); !ok {
-				slog.Warn("model called a tool that doesn't exist", "tool", name)
-				failures++
-				lastFailure = fmt.Sprintf("there is no tool named %q", name)
-				msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: unknownTool(name, tools)})
-				continue
-			}
-			if isScheduleTool(name) {
-				if problem := b.checkScheduleCall(sender, name, tc.Function.Arguments); problem != "" {
-					failures++
-					lastFailure = problem
-					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: problem})
-					continue
-				}
-			}
-			if b.needsApproval(tools, name) {
-				decline, timedOut, err := b.approve(ctx, sender, tools, name, tc.Function.Arguments, lastFailure)
-				if err != nil {
-					return "", nil, stats, err
-				}
-				lastFailure = ""
-				if decline != "" {
-					// Don't keep asking someone who said no twice or isn't there.
-					declines++
-					toolsOver = timedOut || declines >= 2
-					msgs = append(msgs, ollama.Message{Role: "tool", ToolName: name, Content: decline})
-					continue
-				}
-			}
-			b.setTool(sender, name)
-			start := time.Now()
-			var out toolbox.Output
-			var err error
-			switch {
-			case isScheduleTool(name):
-				out = b.callScheduleTool(sender, name, tc.Function.Arguments)
-			default:
-				out, err = b.opt.Tools.Call(ctx, name, tc.Function.Arguments)
-			}
-			b.setTool(sender, "")
-			if ctx.Err() != nil {
-				return "", nil, stats, ctx.Err()
-			}
-			attrs := []any{"tool", name, "args", argKeys(tc.Function.Arguments), "took", time.Since(start).Round(time.Millisecond),
-				"images", len(out.Images), "is_error", out.IsError}
-			attrs = append(attrs, "chars", len(out.Text))
-			if len(out.Dropped) > 0 {
-				attrs = append(attrs, "dropped_args", out.Dropped)
-			}
-			if out.Retried != "" {
-				attrs = append(attrs, "retried_without_args", snippet(out.Retried, 120))
-			}
-			if out.Truncated > 0 {
-				attrs = append(attrs, "truncated_chars", out.Truncated)
-			}
-			if err != nil {
-				attrs = append(attrs, "err", err)
-			} else if out.IsError {
-				attrs = append(attrs, "error_text", snippet(out.Text, 200))
-			}
-			slog.Info("tool call", attrs...)
-			lastFailure = ""
-			if err != nil || out.IsError {
-				failures++
-				lastFailure = out.Text
-				if err != nil {
-					lastFailure = err.Error()
-				}
-			}
-
-			msg := ollama.Message{Role: "tool", ToolName: name, Content: out.Text}
-			if err != nil {
-				msg.Content = "Tool failed: " + err.Error()
-			} else if out.IsError {
-				msg.Content = "Tool returned an error: " + out.Text
-			}
-			unseen := 0
-			for _, img := range out.Images {
-				images = append(images, img)
-				// Vision models take still JPEG or PNG pictures; a clip (GIF) is only for the user.
-				if vision && stillImage(img.MIME) {
-					msg.Images = append(msg.Images, img.Data)
-				} else {
-					unseen++
-				}
-			}
-			if seen := len(out.Images) - unseen; seen > 0 {
-				msg.Content = strings.TrimSpace(msg.Content + "\n" +
-					fmt.Sprintf("[%d image(s) attached. They will also be sent to the user with your reply.]", seen))
-			}
-			if unseen > 0 {
-				msg.Content = strings.TrimSpace(msg.Content + "\n" +
-					fmt.Sprintf("[%d image(s) or clip(s) returned. They will be sent to the user with your reply; you cannot see them.]", unseen))
-			}
-			msgs = append(msgs, msg)
 		}
 	}
+}
+
+// toolRun is the state of one run's tool use: the conversation so far, and what it has cost.
+type toolRun struct {
+	b      *Bot
+	sender string
+	tools  []toolbox.Tool
+	vision bool // the model sees pictures
+
+	msgs        []ollama.Message
+	defs        []ollama.Tool // the tools offered; nil once tool use is over
+	images      []toolbox.Image
+	stats       ollama.Stats
+	failures    int
+	nudged      bool   // asked once for an answer after the model wrote none
+	lastFailure string // error from the previous tool call, shown if the next one needs approval
+	declines    int
+	toolsOver   bool // the user declined twice or didn't answer: no more tool calls
+}
+
+// limit ends tool use when it has gone on long enough: too many rounds or failures, or the
+// user said no. The model is then asked for a final answer.
+func (r *toolRun) limit(round int) {
+	if round != r.b.opt.MaxToolRounds && r.failures < maxToolFailures && !r.toolsOver {
+		return
+	}
+	if len(r.defs) > 0 {
+		slog.Warn("no more tool calls for this message, asking for a final answer", "rounds", round, "failures", r.failures)
+		r.msgs = append(r.msgs, ollama.Message{Role: "system", Content: "Tool use is over for this message. " +
+			"Answer now with what you have. If the tools failed, say so plainly; do not guess values."})
+	}
+	r.defs = nil
+}
+
+// nudge asks once more for an answer: some models stop after their tool calls without
+// writing anything.
+func (r *toolRun) nudge(round int) {
+	slog.Warn("model wrote no answer after using tools, asking again", "rounds", round)
+	r.nudged, r.defs = true, nil
+	r.msgs = append(r.msgs, ollama.Message{Role: "system", Content: "You used tools but wrote no answer. " +
+		"Answer now, in words, with what the tools returned. If they found nothing, say so."})
+}
+
+// call handles one tool call: runs it if it may, and tells the model the result or why not.
+func (r *toolRun) call(ctx context.Context, name string, args map[string]any) error {
+	refusal, err := r.gate(ctx, name, args)
+	if err != nil {
+		return err
+	}
+	if refusal != "" {
+		r.msgs = append(r.msgs, ollama.Message{Role: "tool", ToolName: name, Content: refusal})
+		return nil
+	}
+	out, err := r.b.runTool(ctx, r.sender, name, args)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	r.lastFailure = ""
+	if err != nil || out.IsError {
+		r.failures++
+		r.lastFailure = out.Text
+		if err != nil {
+			r.lastFailure = err.Error()
+		}
+	}
+	r.msgs = append(r.msgs, r.result(name, out, err))
+	return nil
+}
+
+// gate decides whether a tool call may run. If not, refusal is what the model is told instead:
+// the tool doesn't exist, the schedule is invalid, or the user said no.
+func (r *toolRun) gate(ctx context.Context, name string, args map[string]any) (refusal string, err error) {
+	if r.toolsOver {
+		return "Not run: no more actions for this message.", nil
+	}
+	// Small models invent tool names. Don't ask the user to approve something that
+	// can't run: tell the model what exists so it can correct the name.
+	if _, ok := findTool(r.tools, name); !ok {
+		slog.Warn("model called a tool that doesn't exist", "tool", name)
+		r.failures++
+		r.lastFailure = fmt.Sprintf("there is no tool named %q", name)
+		return unknownTool(name, r.tools), nil
+	}
+	if isScheduleTool(name) {
+		if problem := r.b.checkScheduleCall(r.sender, name, args); problem != "" {
+			r.failures++
+			r.lastFailure = problem
+			return problem, nil
+		}
+	}
+	if !r.b.needsApproval(r.tools, name) {
+		return "", nil
+	}
+	decline, timedOut, err := r.b.approve(ctx, r.sender, r.tools, name, args, r.lastFailure)
+	if err != nil {
+		return "", err
+	}
+	r.lastFailure = ""
+	if decline != "" {
+		// Don't keep asking someone who said no twice or isn't there.
+		r.declines++
+		r.toolsOver = timedOut || r.declines >= 2
+	}
+	return decline, nil
+}
+
+// result is the message telling the model what a tool returned. Pictures are kept to send to
+// the user, and attached for the model if it can see them.
+func (r *toolRun) result(name string, out toolbox.Output, err error) ollama.Message {
+	msg := ollama.Message{Role: "tool", ToolName: name, Content: out.Text}
+	if err != nil {
+		msg.Content = "Tool failed: " + err.Error()
+	} else if out.IsError {
+		msg.Content = "Tool returned an error: " + out.Text
+	}
+	unseen := 0
+	for _, img := range out.Images {
+		r.images = append(r.images, img)
+		// Vision models take still JPEG or PNG pictures; a clip (GIF) is only for the user.
+		if r.vision && stillImage(img.MIME) {
+			msg.Images = append(msg.Images, img.Data)
+		} else {
+			unseen++
+		}
+	}
+	if seen := len(out.Images) - unseen; seen > 0 {
+		msg.Content = strings.TrimSpace(msg.Content + "\n" +
+			fmt.Sprintf("[%d image(s) attached. They will also be sent to the user with your reply.]", seen))
+	}
+	if unseen > 0 {
+		msg.Content = strings.TrimSpace(msg.Content + "\n" +
+			fmt.Sprintf("[%d image(s) or clip(s) returned. They will be sent to the user with your reply; you cannot see them.]", unseen))
+	}
+	return msg
+}
+
+// runTool runs a tool (an MCP server's, or one of the schedule tools) and logs the call.
+func (b *Bot) runTool(ctx context.Context, sender, name string, args map[string]any) (toolbox.Output, error) {
+	b.setTool(sender, name)
+	start := time.Now()
+	var out toolbox.Output
+	var err error
+	if isScheduleTool(name) {
+		out = b.callScheduleTool(sender, name, args)
+	} else {
+		out, err = b.opt.Tools.Call(ctx, name, args)
+	}
+	b.setTool(sender, "")
+	attrs := []any{"tool", name, "args", argKeys(args), "took", time.Since(start).Round(time.Millisecond),
+		"images", len(out.Images), "is_error", out.IsError, "chars", len(out.Text)}
+	if len(out.Dropped) > 0 {
+		attrs = append(attrs, "dropped_args", out.Dropped)
+	}
+	if out.Retried != "" {
+		attrs = append(attrs, "retried_without_args", snippet(out.Retried, 120))
+	}
+	if out.Truncated > 0 {
+		attrs = append(attrs, "truncated_chars", out.Truncated)
+	}
+	if err != nil {
+		attrs = append(attrs, "err", err)
+	} else if out.IsError {
+		attrs = append(attrs, "error_text", snippet(out.Text, 200))
+	}
+	if ctx.Err() == nil {
+		slog.Info("tool call", attrs...)
+	}
+	return out, err
 }
 
 // unknownTool tells the model a tool doesn't exist and lists the ones that do.
