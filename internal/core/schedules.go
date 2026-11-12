@@ -361,10 +361,7 @@ func (b *Bot) checkRun(ctx context.Context, sender, task, content string, opt ch
 	if err != nil {
 		return "", nil, false, fmt.Errorf("load history: %w", err)
 	}
-	model := chat.Model
-	if model == "" {
-		model = b.opt.DefaultModel
-	}
+	model := b.modelOf(chat)
 	if opt.model != "" {
 		model = opt.model
 	}

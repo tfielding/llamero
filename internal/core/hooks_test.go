@@ -335,6 +335,30 @@ func TestParseRunNumbers(t *testing.T) {
 	}
 }
 
+// A hook's first event has Ollama load the check's model while the events are grouped: the
+// hook's own model, or else the chat model of whoever gets the message. Hooks without a task
+// don't use a model.
+func TestHookWarmUp(t *testing.T) {
+	b, m, l, _ := setupHooks(t,
+		Hook{Name: "own", Task: "Check.", Model: "small-vision", Group: 50 * time.Millisecond},
+		Hook{Name: "chat", Task: "Check.", To: []string{me}, Group: 50 * time.Millisecond},
+		Hook{Name: "plain", Group: 50 * time.Millisecond})
+	l.answer = "Something."
+	b.Handle(dm(me, "/models qwen2.5:7b"))
+	reply(t, m)
+	b.Hook(b.ctx, "own", "one", "")
+	b.Hook(b.ctx, "own", "two", "") // grouped: no second load
+	b.Hook(b.ctx, "chat", "three", "")
+	b.Hook(b.ctx, "plain", "four", "")
+	replies(t, m, 3)
+	l.mu.Lock()
+	loaded := slices.Sorted(slices.Values(l.loaded))
+	l.mu.Unlock()
+	if !slices.Equal(loaded, []string{"qwen2.5:7b", "small-vision"}) {
+		t.Errorf("loaded %v", loaded)
+	}
+}
+
 func TestHookLeanRun(t *testing.T) {
 	b, m, l, ft := setupHooks(t,
 		Hook{Name: "door", Task: "Check the door.", Model: "small-vision", Think: "off", Tools: []string{"get_state", "turn_off", "nope"}},

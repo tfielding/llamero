@@ -84,6 +84,25 @@ func TestPingFailsFast(t *testing.T) {
 	}
 }
 
+// Load is a chat with no messages, which Ollama answers once the model is in memory.
+func TestLoad(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&got)
+		io.WriteString(w, `{"model":"m","message":{"role":"assistant","content":""},"done":true,"done_reason":"load"}`)
+	}))
+	defer srv.Close()
+	if err := New(srv.URL, time.Minute).Load(context.Background(), "m"); err != nil {
+		t.Fatal(err)
+	}
+	if msgs, ok := got["messages"].([]any); got["model"] != "m" || !ok || len(msgs) != 0 || got["stream"] != false {
+		t.Errorf("sent %v", got)
+	}
+}
+
 func TestChatCancel(t *testing.T) {
 	aborted := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

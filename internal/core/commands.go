@@ -25,10 +25,7 @@ func isRetry(text string) bool {
 func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text string) string {
 	fields := strings.Fields(text)
 	cmd, args := strings.ToLower(fields[0]), fields[1:]
-	current := chat.Model
-	if current == "" {
-		current = b.opt.DefaultModel
-	}
+	current := b.modelOf(*chat)
 
 	switch cmd {
 	case "/help":

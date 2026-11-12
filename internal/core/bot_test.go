@@ -84,6 +84,7 @@ type fakeLLM struct {
 	answer   string           // if set, the final answer instead of an echo
 	offered  []string         // tool names offered in the last call
 	blanks   int              // if set, this many answers (not tool calls) come back empty
+	loaded   []string         // models Load was asked for
 }
 
 func (f *fakeLLM) Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error) {
@@ -137,6 +138,12 @@ func (f *fakeLLM) Models(context.Context) ([]string, error) {
 func (f *fakeLLM) Ping(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.pingErr
+}
+func (f *fakeLLM) Load(_ context.Context, model string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.loaded = append(f.loaded, model)
 	return f.pingErr
 }
 func (f *fakeLLM) Info(_ context.Context, model string) (ollama.ModelInfo, error) {

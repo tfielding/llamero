@@ -142,6 +142,14 @@ func (c *Client) Chat(ctx context.Context, model string, msgs []Message, think a
 	}, nil
 }
 
+// Load has Ollama load model into memory, so the next request for it doesn't wait. It returns
+// once the model is loaded (right away if it already was).
+func (c *Client) Load(ctx context.Context, model string) error {
+	body, _ := json.Marshal(map[string]any{"model": model, "messages": []Message{}, "stream": false})
+	var out struct{}
+	return c.do(ctx, http.MethodPost, "/api/chat", body, &out)
+}
+
 // Ping checks that Ollama is reachable, failing fast (it doesn't wait for a model).
 func (c *Client) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(len(c.bases))*dialTimeout)

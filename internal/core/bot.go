@@ -26,6 +26,7 @@ type LLM interface {
 	Chat(ctx context.Context, model string, msgs []ollama.Message, think any, tools []ollama.Tool) (ollama.Result, error)
 	Models(ctx context.Context) ([]string, error)
 	Ping(ctx context.Context) error
+	Load(ctx context.Context, model string) error
 	Info(ctx context.Context, model string) (ollama.ModelInfo, error)
 }
 
@@ -326,4 +327,12 @@ func mask(s string) string {
 		return s
 	}
 	return "…" + s[len(s)-4:]
+}
+
+// modelOf is the model a chat uses: the one picked with /models, or the default.
+func (b *Bot) modelOf(chat store.Chat) string {
+	if chat.Model != "" {
+		return chat.Model
+	}
+	return b.opt.DefaultModel
 }

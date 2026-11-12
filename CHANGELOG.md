@@ -28,6 +28,9 @@ All notable changes to this project are documented here. The format follows
   used to hide the tool without a word.
 
 ### Changed
+- A hook's first event has Ollama load the check's model while the events are grouped, so the
+  check doesn't wait for it when Ollama unloaded it after being idle (a few seconds to load
+  a large model, or more).
 - `/stats` after a reply that used tools shows how many model calls it took and splits the time
   reading the prompt into the first call and the rest. Ollama reuses what it read for earlier
   calls but counts those tokens again, so the total count looked like rereading when it wasn't.

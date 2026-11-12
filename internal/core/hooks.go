@@ -112,6 +112,13 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	if waiting {
 		return true
 	}
+	if h.Task != "" {
+		b.workers.Add(1)
+		go func() {
+			defer b.workers.Done()
+			b.warmUp(ctx, h)
+		}()
+	}
 	b.workers.Add(1)
 	go func() {
 		defer b.workers.Done()
@@ -134,6 +141,32 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		}
 	}()
 	return true
+}
+
+// warmUp has Ollama load the model a hook's check will use while the events are being grouped,
+// so the check doesn't wait for it, e.g. after Ollama unloaded it when idle. It's only a head
+// start: if it fails, the check finds out for itself.
+func (b *Bot) warmUp(ctx context.Context, h Hook) {
+	model := h.Model
+	if model == "" {
+		to := slices.Concat(b.hookRecipients(h), h.Groups)
+		if len(to) == 0 {
+			return
+		}
+		chat, err := b.store.Load(to[0]) // the check runs in the first recipient's chat
+		if err != nil {
+			return
+		}
+		model = b.modelOf(chat)
+	}
+	start := time.Now()
+	if err := b.llm.Load(ctx, model); err != nil {
+		if ctx.Err() == nil {
+			slog.Info("hook: couldn't load the model ahead of the check", "hook", h.Name, "model", model, "err", short(err))
+		}
+		return
+	}
+	slog.Info("hook: model ready for the check", "hook", h.Name, "model", model, "took", time.Since(start).Round(100*time.Millisecond))
 }
 
 // titled puts the hook's title line (and a note, if any, in brackets) above body. With bold set

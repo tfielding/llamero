@@ -79,10 +79,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []transport
 		}
 	}
 
-	model := chat.Model
-	if model == "" {
-		model = b.opt.DefaultModel
-	}
+	model := b.modelOf(chat)
 	// Fail fast with a clear message if Ollama is down (e.g. the machine is asleep),
 	// or wake it first if Wake-on-LAN is set up.
 	if err := b.llm.Ping(ctx); err != nil {

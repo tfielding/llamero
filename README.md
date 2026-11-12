@@ -460,6 +460,10 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
   **503** still starting up.
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
+- When a hook with a `task` gets its first event, Ollama is asked to load the check's model right
+  away, so it's ready by the time the `group` window ends. On a machine where Ollama unloads idle
+  models (after 5 minutes by default), the first alert after a quiet spell doesn't wait for the
+  model to load.
 - `/hooks` shows the last 20 checks, numbered, and what each decided, including the model's
   reason for "nothing to report", which helps when tuning `task` and `only_if`. They're saved in
   `data/hooks.json` with their events, so a restart keeps them.
