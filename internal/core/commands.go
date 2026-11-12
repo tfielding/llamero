@@ -130,7 +130,9 @@ const helpText = `Commands:
 /stats - speed of the last reply
 /settings - current configuration (secrets hidden)
 /knowledge - notes the bot has from the knowledge folder
-/hooks - the latest hook checks and what each decided (/hooks stats for totals, /hooks replay to check again)
+/hooks - the latest hook checks, numbered, and what each decided (/hooks stats for totals)
+/hooks replay - check again the events that went out unchecked, and send what's found
+/hooks replay <number> - check runs from /hooks again with the hook's current settings, only for you (14, 12-15)
 /snooze - mute hooks for a while (/snooze 2h, /snooze <hook> 30m, /snooze off)
 /schedules - scheduled checks (delete, pause, resume or run with a number)
 /wake - wake the Ollama machine (Wake-on-LAN)

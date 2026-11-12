@@ -17,14 +17,9 @@ go test -race ./...
 
 The tests run entirely offline against in-process fakes, so no real services are needed.
 
-Before sending a pull request, make sure these pass (CI runs the same checks):
-
-```bash
-gofmt -l .          # should print nothing
-go vet ./...
-staticcheck ./...   # https://staticcheck.dev
-go test -race ./...
-```
+Before sending a pull request, run `make check`: the same checks CI runs (gofmt, go vet,
+[staticcheck](https://staticcheck.dev) and the tests with `-race`). The tests include one that
+the README's settings table matches the code, so a new setting needs a row there.
 
 ## Pull requests
 
