@@ -1,11 +1,12 @@
 package core
 
-// /hooks: the latest hook checks and what each decided, for tuning a hook's rules. Kept in
-// memory only.
+// /hooks: the latest hook checks and what each decided, for tuning a hook's rules. Saved with
+// the hook state, events and all, so /hooks replay can check them again after a restart.
 
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,25 +19,41 @@ const (
 )
 
 type hookEntry struct {
+	id      int // its number in /hooks, for /hooks replay
 	at      time.Time
 	hook    string
-	keys    string // the events' keys, e.g. cameras
-	event   string // the first event, cut
+	keys    []string // the events' keys, e.g. cameras
+	events  []string // the events themselves, for /hooks replay
+	dropped int
 	outcome string // "sent", "nothing to report (…)", "skipped: cooling down", …
 	took    time.Duration
 }
 
-// logHook remembers how a check (or a skipped event) went, for /hooks and /hooks stats.
-func (b *Bot) logHook(hook string, kind hookOutcome, keys []string, event, outcome string, took time.Duration) {
-	e := hookEntry{at: time.Now(), hook: hook, keys: strings.Join(keys, ", "), event: shorten(oneLine(event), hookLogEvent),
-		outcome: outcome, took: took}
+// logHook remembers how a run's check (or a skipped event) went, for /hooks, /hooks stats and
+// /hooks replay.
+func (b *Bot) logHook(run *hookRun, kind hookOutcome, outcome string, took time.Duration) {
+	keys := runKeys(run)
 	b.hooks.mu.Lock()
-	b.countHook(hook, kind, keys, strings.TrimPrefix(outcome, "sent unchecked: "), took)
+	b.hooks.lastID++
+	e := hookEntry{id: b.hooks.lastID, at: time.Now(), hook: run.name, keys: keys, events: slices.Clone(run.events),
+		dropped: run.dropped, outcome: outcome, took: took}
+	b.countHook(run.name, kind, keys, strings.TrimPrefix(outcome, "sent unchecked: "), took)
 	b.hooks.log = append(b.hooks.log, e)
 	if len(b.hooks.log) > hookLogSize {
 		b.hooks.log = b.hooks.log[len(b.hooks.log)-hookLogSize:]
 	}
 	b.hooks.mu.Unlock()
+	b.saveHookState()
+}
+
+// firstEvent is the entry's first event, saying how many more there were.
+func (e hookEntry) firstEvent() string {
+	return firstEvent(&hookRun{events: e.events, dropped: e.dropped})
+}
+
+// entryLabel is how replies name the entry: "door #14 (10:42)".
+func (b *Bot) entryLabel(e hookEntry) string {
+	return fmt.Sprintf("%s #%d (%s)", e.hook, e.id, b.clock(e.at))
 }
 
 // runKeys are a run's event keys, sorted, without the empty one.
@@ -80,18 +97,18 @@ func (b *Bot) hooksCommand(ctx context.Context, sender string, args []string) st
 	switch {
 	case len(args) == 1 && strings.EqualFold(args[0], "stats"):
 		return b.hookStatsText()
-	case len(args) == 1 && strings.EqualFold(args[0], "retry"):
-		return b.retryHooks(ctx, sender)
+	case len(args) > 0 && strings.EqualFold(args[0], "replay"):
+		return b.replayCommand(ctx, sender, args[1:])
 	case len(args) > 0:
-		return "/hooks shows the latest checks; /hooks stats the totals since the bot started; /hooks retry checks the events that went out unchecked."
+		return "/hooks shows the latest checks; /hooks stats the totals since the bot started; /hooks replay checks the events that went out unchecked, and /hooks replay <number> checks one from /hooks again, for you only."
 	}
 	b.hooks.mu.Lock()
 	log := append([]hookEntry(nil), b.hooks.log...)
 	b.hooks.mu.Unlock()
 	if len(log) == 0 {
-		msg := "No hook events since the bot started."
+		msg := "No hook events yet."
 		if n := b.missedCount(); n > 0 {
-			msg += fmt.Sprintf("\n%s from before went out unchecked: /hooks retry checks them now.", plural(n, "run"))
+			msg += fmt.Sprintf("\n%s went out unchecked: /hooks replay checks them now.", plural(n, "run"))
 		}
 		return msg
 	}
@@ -99,25 +116,25 @@ func (b *Bot) hooksCommand(ctx context.Context, sender string, args []string) st
 	sb.WriteString("Latest hook checks, newest first:\n")
 	for i := len(log) - 1; i >= 0; i-- {
 		e := log[i]
-		fmt.Fprintf(&sb, "\n%s %s", e.at.In(b.loc()).Format("15:04"), e.hook)
-		if e.keys != "" {
-			fmt.Fprintf(&sb, " [%s]", e.keys)
+		fmt.Fprintf(&sb, "\n#%d %s %s", e.id, b.clock(e.at), e.hook)
+		if len(e.keys) > 0 {
+			fmt.Fprintf(&sb, " [%s]", strings.Join(e.keys, ", "))
 		}
 		fmt.Fprintf(&sb, ": %s", e.outcome)
 		if e.took >= time.Second {
 			fmt.Fprintf(&sb, ", %s", e.took.Round(time.Second))
 		}
-		if e.event != "" {
-			fmt.Fprintf(&sb, "\n  %s", e.event)
+		if ev := e.firstEvent(); ev != "" {
+			fmt.Fprintf(&sb, "\n  %s", shorten(oneLine(ev), hookLogEvent))
 		}
 	}
-	sb.WriteString("\n\nKept since the bot started, up to 20. /hooks stats for the totals.")
+	sb.WriteString("\n\nThe last 20. /hooks replay <number> checks one again with the hook's current settings, for you only. /hooks stats for the totals.")
 	if n := b.missedCount(); n > 0 {
 		them := "them"
 		if n == 1 {
 			them = "it"
 		}
-		fmt.Fprintf(&sb, "\n%s went out unchecked: /hooks retry checks %s now.", plural(n, "run"), them)
+		fmt.Fprintf(&sb, "\n%s went out unchecked: /hooks replay checks %s now and sends what it finds.", plural(n, "run"), them)
 	}
 	return sb.String()
 }

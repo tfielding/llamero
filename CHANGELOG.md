@@ -11,11 +11,16 @@ All notable changes to this project are documented here. The format follows
   models and the MCP servers without starting the bot, so a mistake shows up before a restart. It
   lists each server's tools and any names in `tools`, `read_only` or hooks that match nothing,
   and exits 1 only when the bot couldn't start.
-- Snoozes and the hook runs waiting for `/hooks retry` are saved in `data/hooks.json`, so a
-  restart doesn't unmute everything or lose missed checks.
-- `/hooks retry`: check again the hook events that went out unchecked because Ollama was down or
-  the model failed (the last 20 runs). Findings are sent as usual, marked
-  "rechecked"; the one who asked hears about the rest. `/hooks` says when some are waiting.
+- `/hooks replay`: check hook events again.
+  - `/hooks replay 14` (or `12-15`, at most 10) checks runs from `/hooks`, now numbered, with the
+    hook's current settings, and shows only you what it decides next to what it decided before.
+    Tune a hook's task or model on real events without waiting for new ones.
+  - `/hooks replay` alone checks the events that went out unchecked because Ollama was down or the
+    model failed (the last 20 runs). Findings are sent as usual, marked "rechecked"; the one who
+    asked hears about the rest. `/hooks` says when some are waiting.
+- Snoozes, the last 20 hook checks (`/hooks`, with their events) and the runs waiting for
+  `/hooks replay` are saved in `data/hooks.json`, so a restart doesn't unmute everything or lose
+  them.
 - The model is told the current date and time with every message, chats and checks alike, so
   questions about "yesterday" or "this week" don't spend a tool call on the time.
 - Names in a server's `tools` that it doesn't have are logged at startup, with a close match

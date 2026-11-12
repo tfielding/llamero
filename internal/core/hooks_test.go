@@ -245,7 +245,7 @@ func TestHookCooldown(t *testing.T) {
 func TestHooksCommand(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check.", OnlyIf: "a person", Cooldown: time.Minute})
 	b.Handle(dm(me, "/hooks"))
-	if got := reply(t, m); got != "No hook events since the bot started." {
+	if got := reply(t, m); got != "No hook events yet." {
 		t.Errorf("empty: %q", got)
 	}
 	l.answer = "NOTHING_TO_REPORT. Only a car passing on the street."
@@ -272,6 +272,66 @@ func TestHooksCommand(t *testing.T) {
 	}
 	if strings.Index(got, "skipped") > strings.Index(got, "nothing to report") {
 		t.Errorf("not newest first:\n%s", got)
+	}
+}
+
+// /hooks replay <number> checks an earlier run again and tells only whoever asked, next to what
+// it decided before. Nothing else changes: no cooldown, no new entry in /hooks.
+func TestHooksReplay(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "cams", Task: "Check.", OnlyIf: "a person", Cooldown: time.Minute})
+	b.opt.Location = time.UTC
+	l.answer = nothingToReport + " Only a car."
+	b.Hook(b.ctx, "cams", "car on laneway_south", "laneway_south")
+	expectSilence(t, m)
+	b.hooks.mu.Lock()
+	at := b.clock(b.hooks.log[0].at)
+	b.hooks.mu.Unlock()
+
+	l.mu.Lock()
+	l.answer = "A person by the car."
+	l.mu.Unlock()
+	b.Handle(dm(me, "/hooks replay #1 7"))
+	got := replies(t, m, 2)
+	if !strings.HasPrefix(got[0], "Checking again with the hooks' current settings. The answers come only to you:\n") ||
+		!strings.Contains(got[0], "\n#1 "+at+" cams [laneway_south], before: nothing to report (Only a car)") ||
+		!strings.Contains(got[0], "\n#7: not kept any more") {
+		t.Errorf("reply:\n%s", got[0])
+	}
+	if want := "🔔 **cams** (replay of #1 from " + at + ", only to you)\n\nA person by the car.\n\nBefore: nothing to report (Only a car)."; got[1] != want {
+		t.Errorf("replay:\n%q\nwant\n%q", got[1], want)
+	}
+	b.hooks.mu.Lock()
+	entries := len(b.hooks.log)
+	_, cooling := b.hooks.cooldowns["cams\x00laneway_south"]
+	b.hooks.mu.Unlock()
+	if entries != 1 || cooling {
+		t.Errorf("the replay changed things: %d entries, cooling %v", entries, cooling)
+	}
+
+	l.mu.Lock()
+	l.answer = nothingToReport + " Still a car."
+	l.mu.Unlock()
+	b.Handle(dm(me, "/hooks replay 1"))
+	if got := replies(t, m, 2); got[1] != "cams #1 ("+at+"): nothing to report (Still a car). Before: nothing to report (Only a car)." {
+		t.Errorf("nothing to report: %q", got[1])
+	}
+
+	for in, want := range map[string]string{
+		"/hooks replay x":    "/hooks replay takes numbers from /hooks",
+		"/hooks replay 3-1":  "/hooks replay takes numbers from /hooks",
+		"/hooks replay 1-11": "At most 10 runs at a time",
+	} {
+		b.Handle(dm(me, in))
+		if got := reply(t, m); !strings.HasPrefix(got, want) {
+			t.Errorf("%s: %q", in, got)
+		}
+	}
+}
+
+func TestParseRunNumbers(t *testing.T) {
+	got, err := parseRunNumbers([]string{"#3", "5-7", "6", "#9-#10"})
+	if err != nil || !slices.Equal(got, []int{3, 5, 6, 7, 9, 10}) {
+		t.Errorf("got %v, %v", got, err)
 	}
 }
 
@@ -453,7 +513,7 @@ func replies(t *testing.T, m *fakeMsg, n int) []string {
 	return out
 }
 
-func TestHooksRetry(t *testing.T) {
+func TestHooksReplayMissed(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", Cooldown: time.Hour})
 	b.opt.Location = time.UTC
 	l.pingErr = errors.New("connection refused")
@@ -462,7 +522,7 @@ func TestHooksRetry(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 	b.Handle(dm(me, "/hooks"))
-	if got := reply(t, m); !strings.Contains(got, "\n1 run went out unchecked: /hooks retry checks it now.") {
+	if got := reply(t, m); !strings.Contains(got, "\n1 run went out unchecked: /hooks replay checks it now and sends what it finds.") {
 		t.Fatalf("/hooks:\n%s", got)
 	}
 	b.hooks.mu.Lock()
@@ -471,10 +531,10 @@ func TestHooksRetry(t *testing.T) {
 	b.hooks.mu.Unlock()
 
 	// Still down: it stays on the list, and the one who asked hears so.
-	b.Handle(dm(me, "/hooks retry"))
+	b.Handle(dm(me, "/hooks replay"))
 	got := replies(t, m, 2)
 	if !strings.HasPrefix(got[0], "Checking 1 missed hook run again, oldest first:\n\n"+at+" door [front_door]: Ollama is unreachable") ||
-		got[1] != "door (events from "+at+"): still couldn't check: Ollama is unreachable. /hooks retry tries again." {
+		got[1] != "door (events from "+at+"): still couldn't check: Ollama is unreachable. /hooks replay tries again." {
 		t.Fatalf("retry while down: %q", got)
 	}
 
@@ -483,7 +543,7 @@ func TestHooksRetry(t *testing.T) {
 	l.mu.Lock()
 	l.pingErr, l.answer = nil, "Someone left a parcel."
 	l.mu.Unlock()
-	b.Handle(dm(me, "/hooks retry"))
+	b.Handle(dm(me, "/hooks replay"))
 	got = replies(t, m, 2)
 	if !strings.HasPrefix(got[0], "Checking 1 missed hook run again") ||
 		got[1] != "🔔 **door** (rechecked, events from "+at+")\n\nSomeone left a parcel." {
@@ -495,8 +555,8 @@ func TestHooksRetry(t *testing.T) {
 	if !after.Equal(cooling) {
 		t.Errorf("the recheck moved the cooldown from %v to %v", cooling, after)
 	}
-	b.Handle(dm(me, "/hooks retry"))
-	if got := reply(t, m); !strings.HasPrefix(got, "No missed hook checks to retry.") {
+	b.Handle(dm(me, "/hooks replay"))
+	if got := reply(t, m); !strings.HasPrefix(got, "Nothing went out unchecked.") {
 		t.Fatalf("nothing left: %q", got)
 	}
 	b.Handle(dm(me, "/hooks"))
@@ -505,7 +565,7 @@ func TestHooksRetry(t *testing.T) {
 	}
 }
 
-func TestHooksRetryNothingToReport(t *testing.T) {
+func TestHooksReplayMissedNothingToReport(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door.", OnlyIf: "someone is at the door"})
 	l.pingErr = errors.New("connection refused")
 	b.Hook(b.ctx, "door", "motion on front_door", "")
@@ -513,14 +573,14 @@ func TestHooksRetryNothingToReport(t *testing.T) {
 	l.mu.Lock()
 	l.pingErr, l.answer = nil, nothingToReport+" Just the wind."
 	l.mu.Unlock()
-	b.Handle(dm(me, "/hooks retry"))
+	b.Handle(dm(me, "/hooks replay"))
 	got := replies(t, m, 2)
 	if !strings.HasPrefix(got[1], "door (events from ") || !strings.HasSuffix(got[1], "): nothing to report (Just the wind)") {
 		t.Fatalf("got %q", got)
 	}
 }
 
-// Snoozes and missed runs outlast a restart; the hook log doesn't need to.
+// Snoozes, the latest checks and missed runs outlast a restart.
 func TestHookStateSurvivesRestart(t *testing.T) {
 	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door."})
 	path := filepath.Join(t.TempDir(), "hooks.json")
@@ -532,7 +592,7 @@ func TestHookStateSurvivesRestart(t *testing.T) {
 	reply(t, m)
 	// The run is saved just after its unchecked message is sent.
 	for i := 0; i < 100; i++ {
-		if data, _ := os.ReadFile(path); strings.Contains(string(data), "back_door") {
+		if data, _ := os.ReadFile(path); strings.Contains(string(data), `"missed"`) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -549,13 +609,14 @@ func TestHookStateSurvivesRestart(t *testing.T) {
 		t.Errorf("snooze lost:\n%s", got)
 	}
 	b2.Handle(dm(me, "/hooks"))
-	if got := reply(t, m); !strings.Contains(got, "1 run from before went out unchecked") {
-		t.Errorf("missed run lost:\n%s", got)
+	if got := reply(t, m); !strings.Contains(got, "#1 ") || !strings.Contains(got, "door [back_door]: sent unchecked: Ollama is unreachable\n  person on back_door") ||
+		!strings.Contains(got, "1 run went out unchecked: /hooks replay checks it now") {
+		t.Errorf("checks or missed run lost:\n%s", got)
 	}
 	l.mu.Lock()
 	l.pingErr, l.answer = nil, "Someone at the back door."
 	l.mu.Unlock()
-	b2.Handle(dm(me, "/hooks retry"))
+	b2.Handle(dm(me, "/hooks replay"))
 	got := replies(t, m, 2)
 	if !strings.Contains(got[0], "door [back_door]: Ollama is unreachable") || !strings.HasPrefix(got[1], "🔔 **door** (rechecked, events from ") {
 		t.Fatalf("retry after restart: %q", got)

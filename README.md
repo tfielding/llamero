@@ -58,7 +58,7 @@ Telegram app ⇄ Telegram Bot API    ⇄ ┘    ⇅
 | `/schedules delete\|pause\|resume\|run <n>` | Change one schedule, or run it now |
 | `/hooks` | The latest [hook](#hooks) checks and what each decided (sent, nothing to report and why, skipped while cooling down), since the bot started |
 | `/hooks stats` | Totals per hook since the bot started: checked, sent, nothing to report, sent unchecked and why, skipped, check times, and the busiest keys |
-| `/hooks retry` | Check again the hook events that went out unchecked (Ollama down, or the model failed) |
+| `/hooks replay` | Check again the hook events that went out unchecked (Ollama down, or the model failed); with numbers from `/hooks` (`/hooks replay 14`, `12-15`), check those runs again with the hook's current settings, for you only |
 | `/snooze 2h` | Mute every [hook](#hooks) for you for a while (`30m`, `1h30m`, `1d`, up to `7d`); `/snooze <hook> 2h` mutes one, `/snooze <hook> <key> 2h` one hook's events for one key (e.g. a camera) |
 | `/snooze` | What you've snoozed; `/snooze off` (or `/snooze <hook> off`) unmutes |
 | `/settings` | The settings in use, with tokens and phone numbers hidden |
@@ -455,25 +455,33 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   Default: 🔔 and the hook's name. `none` leaves it out, so a message is just the answer.
 - **`wake`:** wake the Ollama machine if it's asleep (needs [Wake-on-LAN](#wake-on-lan)). Without
   it, or if Ollama can't be reached, you get the events unchecked, marked "not checked", rather
-  than nothing. Once Ollama is back, `/hooks retry` checks them (see below).
+  than nothing. Once Ollama is back, `/hooks replay` checks them (see below).
 - Hooks are served on the health port, `HEALTH_ADDR` (default 8092). Publish it, or put the caller
   on the same Docker network. Responses: **202** queued, **401** wrong token, **404** no such hook,
   **503** still starting up.
 - Runs wait their turn behind your own messages, and `/stop` cancels one that's running.
-- `/hooks` shows the latest checks and what each decided, including the model's reason for
-  "nothing to report", which helps when tuning `task` and `only_if`.
+- `/hooks` shows the last 20 checks, numbered, and what each decided, including the model's
+  reason for "nothing to report", which helps when tuning `task` and `only_if`. They're saved in
+  `data/hooks.json` with their events, so a restart keeps them.
 - `/hooks stats` shows the totals per hook since the bot started: how many checks sent a
   message and how many found nothing, how often events went out unchecked (and why, e.g. Ollama
   unreachable), how many were skipped while cooling down or snoozed, typical and slowest check
-  times, and the busiest keys with how many of each were sent. Like `/hooks`, it's kept in
-  memory, so a restart starts it over.
-- `/hooks retry` checks the events that went out unchecked, once Ollama is back: the last 20
-  such runs, with their full event text. They're saved in `data/hooks.json`, so a restart
-  doesn't lose them. A check that finds something is
-  sent as usual, marked "rechecked, events from 10:42"; you're told about the ones with nothing to
-  report, and any that still can't be checked stay for another try. Pictures the tools fetch are
-  from now, not from when the events happened. A recheck doesn't start a cooldown. `/hooks` says
-  when some are waiting.
+  times, and the busiest keys with how many of each were sent. It's kept in memory, so a restart
+  starts it over.
+- `/hooks replay 14` checks run #14 from `/hooks` again with the hook's current `task`,
+  `only_if`, `model`, `think` and `tools`, and shows only you what it decides now, next to what it
+  decided before. Change a hook, restart, and replay a few runs to see whether it does better,
+  without waiting for new events. Ranges and several numbers work (`/hooks replay 12-15`, at most
+  10 at a time), skipped events (cooling down, snoozed) can be replayed too, and nothing else
+  changes: no messages to anyone else, no cooldown, no new entry in `/hooks`.
+- `/hooks replay` alone checks the events that went out unchecked, once Ollama is back: the last
+  20 such runs, saved in `data/hooks.json` too. A check that finds something is sent as usual,
+  marked "rechecked, events from 10:42"; you're told about the ones with nothing to report, and
+  any that still can't be checked stay for another try. A recheck doesn't start a cooldown.
+  `/hooks` says when some are waiting.
+- Either way, pictures the tools fetch of a camera are from now, not from when the events
+  happened. Tools that take a Frigate event's id (its snapshot, `review_alert`) still show the
+  original moment.
 - `/snooze` mutes hooks for a while, for the person who sends it: during yard work, or when
   guests are expected. `/snooze 2h` mutes them all, `/snooze camera_alert 30m` one, and
   `/snooze camera_alert front_door 1h` only that hook's events sent with that `key`. Muted events

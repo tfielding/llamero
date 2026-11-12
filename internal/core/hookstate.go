@@ -13,17 +13,19 @@ import (
 
 // hookState is everything the bot keeps about hooks while it runs: events waiting to be
 // handled, cooldowns, snoozes, and what happened to past runs (/hooks, /hooks stats,
-// /hooks retry). It has its own lock, apart from the chats'.
+// /hooks replay). It has its own lock, apart from the chats'.
 //
-// Snoozes and the runs waiting for /hooks retry are saved (Options.HookStateFile), so a restart
-// doesn't unmute everything or lose checks that were missed. The rest starts over.
+// Snoozes, the latest checks and the runs waiting for /hooks replay are saved
+// (Options.HookStateFile), so a restart doesn't unmute everything or lose what can be checked
+// again. The rest starts over.
 type hookState struct {
 	mu        sync.Mutex
 	runs      map[string]*hookRun     // events waiting for their run, by hook
 	cooldowns map[string]time.Time    // until when each hook (and key) skips events, after a message
 	snoozes   map[snoozeKey]time.Time // until when someone gets no messages from a hook (/snooze)
-	log       []hookEntry             // the latest checks, for /hooks
-	missed    []missedRun             // runs whose events went out unchecked, for /hooks retry
+	log       []hookEntry             // the latest checks, for /hooks and /hooks replay
+	lastID    int                     // the latest check's number
+	missed    []missedRun             // runs whose events went out unchecked, for /hooks replay
 	stats     map[string]*hookStats   // how each hook's events were handled, for /hooks stats
 
 	saveMu sync.Mutex // one save at a time, so an older snapshot can't overwrite a newer one
@@ -38,6 +40,18 @@ func newHookState() hookState {
 type savedHooks struct {
 	Snoozes []savedSnooze `json:"snoozes,omitempty"`
 	Missed  []savedMissed `json:"missed,omitempty"`
+	Log     []savedEntry  `json:"log,omitempty"`
+}
+
+type savedEntry struct {
+	ID      int           `json:"id"`
+	At      time.Time     `json:"at"`
+	Hook    string        `json:"hook"`
+	Keys    []string      `json:"keys,omitempty"`
+	Events  []string      `json:"events"`
+	Dropped int           `json:"dropped,omitempty"`
+	Outcome string        `json:"outcome"`
+	Took    time.Duration `json:"took,omitempty"`
 }
 
 type savedSnooze struct {
@@ -56,7 +70,7 @@ type savedMissed struct {
 	Why     string    `json:"why"`
 }
 
-// loadHookState reads the saved snoozes and missed runs. A file that can't be read is logged
+// loadHookState reads the saved snoozes, checks and missed runs. A file that can't be read is logged
 // and left alone: the bot starts without them rather than not at all.
 func (b *Bot) loadHookState() {
 	path := b.opt.HookStateFile
@@ -72,7 +86,7 @@ func (b *Bot) loadHookState() {
 		err = json.Unmarshal(data, &saved)
 	}
 	if err != nil {
-		slog.Warn("hook state unreadable, starting without saved snoozes and missed checks", "file", path, "err", err)
+		slog.Warn("hook state unreadable, starting without saved snoozes and checks", "file", path, "err", err)
 		return
 	}
 	now := time.Now()
@@ -96,10 +110,18 @@ func (b *Bot) loadHookState() {
 	if len(b.hooks.missed) > maxMissed {
 		b.hooks.missed = b.hooks.missed[len(b.hooks.missed)-maxMissed:]
 	}
-	slog.Info("hook state loaded", "snoozes", len(b.hooks.snoozes), "missed", len(b.hooks.missed))
+	for _, e := range saved.Log {
+		b.hooks.log = append(b.hooks.log, hookEntry{id: e.ID, at: e.At, hook: e.Hook, keys: e.Keys, events: e.Events,
+			dropped: e.Dropped, outcome: e.Outcome, took: e.Took})
+		b.hooks.lastID = max(b.hooks.lastID, e.ID)
+	}
+	if len(b.hooks.log) > hookLogSize {
+		b.hooks.log = b.hooks.log[len(b.hooks.log)-hookLogSize:]
+	}
+	slog.Info("hook state loaded", "snoozes", len(b.hooks.snoozes), "checks", len(b.hooks.log), "missed", len(b.hooks.missed))
 }
 
-// saveHookState writes the snoozes and missed runs, replacing the file in one step.
+// saveHookState writes the snoozes, checks and missed runs, replacing the file in one step.
 func (b *Bot) saveHookState() {
 	path := b.opt.HookStateFile
 	if path == "" {
@@ -118,6 +140,10 @@ func (b *Bot) saveHookState() {
 	for _, m := range b.hooks.missed {
 		saved.Missed = append(saved.Missed, savedMissed{Hook: m.run.name, Events: m.run.events, Dropped: m.run.dropped,
 			Keys: runKeys(m.run), At: m.run.missedAt, Why: m.why})
+	}
+	for _, e := range b.hooks.log {
+		saved.Log = append(saved.Log, savedEntry{ID: e.id, At: e.at, Hook: e.hook, Keys: e.keys, Events: e.events,
+			Dropped: e.dropped, Outcome: e.outcome, Took: e.took})
 	}
 	b.hooks.mu.Unlock()
 	slices.SortFunc(saved.Snoozes, func(a, b savedSnooze) int { return a.Until.Compare(b.Until) })
