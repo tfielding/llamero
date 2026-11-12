@@ -491,9 +491,9 @@ func (b *Bot) missedCount() int {
 // the checks go in sender's queue and use their chat model, unless the hook sets one.
 func (b *Bot) replayCommand(ctx context.Context, sender string, args []string) string {
 	if len(args) > 0 {
-		ids, err := parseRunNumbers(args)
-		if err != nil {
-			return err.Error()
+		ids, problem := parseRunNumbers(args)
+		if problem != "" {
+			return problem
 		}
 		return b.replayRuns(ctx, sender, ids)
 	}
@@ -568,9 +568,9 @@ func (b *Bot) replayRuns(ctx context.Context, sender string, ids []int) string {
 }
 
 // parseRunNumbers reads the run numbers after /hooks replay: "14", "#14", "12-15", several.
-func parseRunNumbers(args []string) ([]int, error) {
-	usage := errors.New("/hooks replay takes numbers from /hooks: /hooks replay 14, /hooks replay 12-15, or /hooks replay alone for the runs that went out unchecked.")
-	var ids []int
+// problem is the reply when they can't be read.
+func parseRunNumbers(args []string) (ids []int, problem string) {
+	const usage = "/hooks replay takes numbers from /hooks: /hooks replay 14, /hooks replay 12-15, or /hooks replay alone for the runs that went out unchecked."
 	for _, a := range args {
 		lo, hi, isRange := strings.Cut(strings.TrimPrefix(a, "#"), "-")
 		from, err := strconv.Atoi(lo)
@@ -586,11 +586,11 @@ func parseRunNumbers(args []string) ([]int, error) {
 				ids = append(ids, id)
 			}
 			if len(ids) > maxReplay {
-				return nil, fmt.Errorf("At most %d runs at a time: each one is a full check.", maxReplay)
+				return nil, fmt.Sprintf("At most %d runs at a time: each one is a full check.", maxReplay)
 			}
 		}
 	}
-	return ids, nil
+	return ids, ""
 }
 
 // tellRequester tells whoever asked for a recheck how it went, when the hook's own message

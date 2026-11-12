@@ -329,9 +329,9 @@ func TestHooksReplay(t *testing.T) {
 }
 
 func TestParseRunNumbers(t *testing.T) {
-	got, err := parseRunNumbers([]string{"#3", "5-7", "6", "#9-#10"})
-	if err != nil || !slices.Equal(got, []int{3, 5, 6, 7, 9, 10}) {
-		t.Errorf("got %v, %v", got, err)
+	got, problem := parseRunNumbers([]string{"#3", "5-7", "6", "#9-#10"})
+	if problem != "" || !slices.Equal(got, []int{3, 5, 6, 7, 9, 10}) {
+		t.Errorf("got %v, %q", got, problem)
 	}
 }
 
