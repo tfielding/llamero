@@ -1,9 +1,12 @@
 # Add the llamero service to your compose file. With Signal, add it to the file that already runs
 # signal-cli-rest-api (MODE=json-rpc), so they share a Docker network. Telegram needs nothing else.
+# See config.example.yml for the settings you can put in /opt/llamero/config/config.yml.
 services:
   llamero:
     container_name: llamero
-    build: ./llamero          # path to this repo
+    image: ghcr.io/tfielding/llamero:latest
+    # Or build from source: comment out `image` and uncomment `build`
+    # build: ./llamero          # path to this repo
     restart: always
     # Settings can go here as environment variables, or in /opt/llamero/config/config.yml
     # (see config.example.yml), or both; environment variables win.

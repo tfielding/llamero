@@ -576,12 +576,12 @@ func (b *Bot) typing(ctx context.Context, to string) (stop func()) {
 	return func() { close(done); <-finished }
 }
 
-// toolGuidance is added to the prompt whenever tools are available. It is deliberately
-// generic: nothing here knows what the tools are.
 // knowledgeIntro introduces the notes from the knowledge folder.
 const knowledgeIntro = "Background the user wrote for you (people, places, routines). Use it when it's relevant; " +
 	"don't repeat it unprompted.\n\n"
 
+// toolGuidance is added to the prompt whenever tools are available. It is deliberately
+// generic: nothing here knows what the tools are.
 const toolGuidance = "You have tools that can look things up or take actions. " +
 	"Use them whenever an answer depends on information they can provide, instead of guessing or saying you can't. " +
 	"Information from tools can change: call them again rather than relying on earlier messages in this conversation. " +
