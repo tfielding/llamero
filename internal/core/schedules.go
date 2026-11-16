@@ -401,7 +401,7 @@ func (b *Bot) checkRun(ctx context.Context, sender, task, content string, opt ch
 	defer cancel()
 	b.active[sender] = activity{model: model, started: time.Now(), cancel: cancel, task: task}
 	b.mu.Unlock()
-	slog.Info("check", "task", task, "model", model, "think", think, "tools", len(tools), "history", !opt.noHistory)
+	slog.Info("check", "task", task, "model", model, "think", think, "vision", info.Has("vision"), "tools", len(tools), "history", !opt.noHistory)
 	answer, images, _, err = b.run(callCtx, sender, model, msgs, b.thinkValue(ctx, model, think), tools, info.Has("vision"))
 	b.mu.Lock()
 	delete(b.active, sender)

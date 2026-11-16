@@ -428,14 +428,20 @@ func (r *toolRun) result(name string, out toolbox.Output, err error) ollama.Mess
 		msg.Content = "Tool returned an error: " + out.Text
 	}
 	unseen := 0
+	var types []string
 	for _, img := range out.Images {
 		r.images = append(r.images, img)
+		types = append(types, img.MIME)
 		// Vision models take still JPEG or PNG pictures; a clip (GIF) is only for the user.
 		if r.vision && stillImage(img.MIME) {
 			msg.Images = append(msg.Images, img.Data)
 		} else {
 			unseen++
 		}
+	}
+	if len(out.Images) > 0 {
+		slog.Info("tool images", "tool", name, "vision", r.vision,
+			"shown_to_model", len(out.Images)-unseen, "not_shown", unseen, "types", types)
 	}
 	if seen := len(out.Images) - unseen; seen > 0 {
 		msg.Content = strings.TrimSpace(msg.Content + "\n" +

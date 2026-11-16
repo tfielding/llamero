@@ -30,6 +30,11 @@ All notable changes to this project are documented here. The format follows
 - Names in a server's `tools` that it doesn't have are logged at startup, with a close match
   (e.g. `search` → `search__search`), like names in `read_only` already were. A wrong name there
   used to hide the tool without a word.
+- When a tool returns pictures, the log says whether the model was shown them (`tool images …
+  vision=true shown_to_model=1 not_shown=0 types=[image/jpeg]`), and the `check` line says
+  whether the model can see (`vision=`). A model that wasn't shown a picture, because it doesn't
+  report the vision capability or the picture is a clip, now shows up in the log instead of
+  silently deciding from the text.
 
 ### Changed
 - A hook's first event has Ollama load the check's model while the events are grouped, so the
