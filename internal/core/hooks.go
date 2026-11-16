@@ -87,12 +87,12 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 	b.hooks.mu.Unlock()
 	if time.Now().Before(until) {
 		slog.Info("hook event skipped: cooling down", "hook", name, "key", key, "for", time.Until(until).Round(time.Second))
-		b.logHook(skipped, outCooling, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0)
+		b.logHook(skipped, outCooling, fmt.Sprintf("skipped: cooling down for %s", time.Until(until).Round(time.Second)), 0, "", 0)
 		return true
 	}
 	if to, left := b.awake(h, map[string]bool{key: true}); len(to) == 0 && len(h.Groups) == 0 && left > 0 {
 		slog.Info("hook event skipped: snoozed", "hook", name, "key", key, "for", left.Round(time.Second))
-		b.logHook(skipped, outSnoozed, "skipped: snoozed for "+humanDuration(left), 0)
+		b.logHook(skipped, outSnoozed, "skipped: snoozed for "+humanDuration(left), 0, "", 0)
 		return true
 	}
 	b.hooks.mu.Lock()
@@ -225,7 +225,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	}
 	if len(to) == 0 {
 		slog.Info("hook events skipped: snoozed", "hook", h.Name, "events", len(run.events)+run.dropped)
-		b.logHook(run, outSnoozed, prefix+"skipped: snoozed for "+humanDuration(left), 0)
+		b.logHook(run, outSnoozed, prefix+"skipped: snoozed for "+humanDuration(left), 0, "", 0)
 		b.tellRequester(ctx, run, "skipped, snoozed for "+humanDuration(left))
 		return
 	}
@@ -234,7 +234,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	if h.Task == "" {
 		b.sendHook(ctx, h, run, to, response{text: h.titled("", events, false)})
 		slog.Info("hook events sent on", "hook", h.Name, "events", len(run.events)+run.dropped)
-		b.logHook(run, outForwarded, "sent on unchecked (no task)", 0)
+		b.logHook(run, outForwarded, "sent on unchecked (no task)", 0, "", 0)
 		return
 	}
 	c := b.checkHook(ctx, sender, h, events)
@@ -243,24 +243,24 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 		return
 	case c.stopped:
 		slog.Info("hook check stopped", "hook", h.Name)
-		b.logHook(run, outStopped, prefix+"stopped with /stop", time.Since(start))
+		b.logHook(run, outStopped, prefix+"stopped with /stop", time.Since(start), "", 0)
 		return
 	case c.why != "" && recheck: // they were sent unchecked already: keep them for another try instead
 		slog.Warn("hook recheck failed", "hook", h.Name, "reason", c.why)
-		b.logHook(run, outUnchecked, "recheck failed: "+c.why, time.Since(start))
+		b.logHook(run, outUnchecked, "recheck failed: "+c.why, time.Since(start), "", 0)
 		b.addMissed(run, c.why)
 		b.tellRequester(ctx, run, "still couldn't check: "+c.why+". /hooks replay tries again.")
 		return
 	case c.why != "":
 		slog.Warn("hook events sent unchecked", "hook", h.Name, "reason", c.why)
-		b.logHook(run, outUnchecked, "sent unchecked: "+c.why, time.Since(start))
+		b.logHook(run, outUnchecked, "sent unchecked: "+c.why, time.Since(start), "", 0)
 		b.sendHook(ctx, h, run, to, response{text: h.titled("not checked: "+c.why, events, false)})
 		run.missedAt = time.Now()
 		b.addMissed(run, c.why)
 		return
 	case c.nothing != "":
 		slog.Info("hook check: nothing to report", "hook", h.Name, "took", time.Since(start).Round(100*time.Millisecond))
-		b.logHook(run, outNothing, prefix+c.nothing, time.Since(start))
+		b.logHook(run, outNothing, prefix+c.nothing, time.Since(start), "", 0)
 		b.tellRequester(ctx, run, c.nothing)
 		return
 	}
@@ -270,7 +270,7 @@ func (b *Bot) runHook(ctx context.Context, sender string, run *hookRun) {
 	}
 	b.sendHook(ctx, h, run, to, response{text: h.titled(note, c.answer, true), fromModel: true, images: c.images})
 	slog.Info("hook check sent", "hook", h.Name, "chars", len(c.answer), "images", len(c.images), "took", time.Since(start).Round(100*time.Millisecond), "recheck", recheck)
-	b.logHook(run, outSent, prefix+"sent", time.Since(start))
+	b.logHook(run, outSent, prefix+"sent", time.Since(start), c.answer, len(c.images))
 	if recheck && !slices.Contains(to, run.requester) {
 		b.tellRequester(ctx, run, "sent")
 	}
@@ -344,10 +344,10 @@ func (b *Bot) replayRun(ctx context.Context, sender string, h Hook, run *hookRun
 	case c.why != "":
 		r.text = fmt.Sprintf("%s: couldn't check: %s.", b.entryLabel(*e), c.why)
 	case c.nothing != "":
-		r.text = fmt.Sprintf("%s: %s. Before: %s.", b.entryLabel(*e), c.nothing, e.outcome)
+		r.text = fmt.Sprintf("%s: %s. Before: %s.", b.entryLabel(*e), c.nothing, e.before())
 	default:
 		note := fmt.Sprintf("replay of #%d from %s, only to you", e.id, b.clock(e.at))
-		r = response{text: h.titled(note, c.answer+"\n\nBefore: "+e.outcome+".", true), fromModel: true, images: c.images}
+		r = response{text: h.titled(note, c.answer+"\n\nBefore: "+e.before()+".", true), fromModel: true, images: c.images}
 	}
 	if err := b.send(ctx, sender, r); err != nil {
 		slog.Error("send failed", "to", mask(sender), "err", err)
@@ -562,7 +562,7 @@ func (b *Bot) replayRuns(ctx context.Context, sender string, ids []int) string {
 		if len(e.keys) > 0 {
 			fmt.Fprintf(&sb, " [%s]", strings.Join(e.keys, ", "))
 		}
-		fmt.Fprintf(&sb, ", before: %s", e.outcome)
+		fmt.Fprintf(&sb, ", before: %s", e.before())
 	}
 	return sb.String()
 }

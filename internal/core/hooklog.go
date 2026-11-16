@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	hookLogSize   = 20  // checks remembered
-	hookLogEvent  = 80  // characters of the event shown
-	hookLogReason = 120 // characters of the model's reason shown
+	hookLogSize    = 20  // checks remembered
+	hookLogEvent   = 80  // characters of the event shown
+	hookLogReason  = 120 // characters of the model's reason shown
+	hookKeepAnswer = 500 // characters of the answer stored
+	hookLogAnswer  = 160 // characters of the answer shown
 )
 
 type hookEntry struct {
@@ -27,16 +29,18 @@ type hookEntry struct {
 	dropped int
 	outcome string // "sent", "nothing to report (…)", "skipped: cooling down", …
 	took    time.Duration
+	answer  string // what the model sent, for "sent" runs (cut to hookKeepAnswer characters)
+	images  int    // pictures sent with it
 }
 
 // logHook remembers how a run's check (or a skipped event) went, for /hooks, /hooks stats and
 // /hooks replay.
-func (b *Bot) logHook(run *hookRun, kind hookOutcome, outcome string, took time.Duration) {
+func (b *Bot) logHook(run *hookRun, kind hookOutcome, outcome string, took time.Duration, answer string, images int) {
 	keys := runKeys(run)
 	b.hooks.mu.Lock()
 	b.hooks.lastID++
 	e := hookEntry{id: b.hooks.lastID, at: time.Now(), hook: run.name, keys: keys, events: slices.Clone(run.events),
-		dropped: run.dropped, outcome: outcome, took: took}
+		dropped: run.dropped, outcome: outcome, took: took, answer: shorten(oneLine(answer), hookKeepAnswer), images: images}
 	b.countHook(run.name, kind, keys, strings.TrimPrefix(outcome, "sent unchecked: "), took)
 	b.hooks.log = append(b.hooks.log, e)
 	if len(b.hooks.log) > hookLogSize {
@@ -49,6 +53,14 @@ func (b *Bot) logHook(run *hookRun, kind hookOutcome, outcome string, took time.
 // firstEvent is the entry's first event, saying how many more there were.
 func (e hookEntry) firstEvent() string {
 	return firstEvent(&hookRun{events: e.events, dropped: e.dropped})
+}
+
+// before returns the outcome line for replay display: "outcome" or "outcome: \"answer\"".
+func (e hookEntry) before() string {
+	if e.answer != "" {
+		return e.outcome + ": \"" + shorten(oneLine(e.answer), hookLogAnswer) + "\""
+	}
+	return e.outcome
 }
 
 // entryLabel is how replies name the entry: "door #14 (10:42)".
@@ -126,6 +138,14 @@ func (b *Bot) hooksCommand(ctx context.Context, sender string, args []string) st
 		}
 		if ev := e.firstEvent(); ev != "" {
 			fmt.Fprintf(&sb, "\n  %s", shorten(oneLine(ev), hookLogEvent))
+		}
+		if e.answer != "" {
+			line := "  → " + shorten(oneLine(e.answer), hookLogAnswer)
+			if e.images > 0 {
+				fmt.Fprintf(&sb, "\n%s  📷 %d", line, e.images)
+			} else {
+				fmt.Fprintf(&sb, "\n%s", line)
+			}
 		}
 	}
 	sb.WriteString("\n\nThe last 20. /hooks replay <number> checks one again with the hook's current settings, for you only. /hooks stats for the totals.")

@@ -465,8 +465,11 @@ curl -H "Authorization: Bearer $WEBHOOK_TOKEN" -H 'Content-Type: application/jso
   models (after 5 minutes by default), the first alert after a quiet spell doesn't wait for the
   model to load.
 - `/hooks` shows the last 20 checks, numbered, and what each decided, including the model's
-  reason for "nothing to report", which helps when tuning `task` and `only_if`. They're saved in
-  `data/hooks.json` with their events, so a restart keeps them.
+  reason for "nothing to report", which helps when tuning `task` and `only_if`. For a check that
+  sent a message, the line starting with → is what the model sent (cut to about 160 characters,
+  with 📷 and a count when pictures came with it), so you can tell whether it looked at the
+  picture or only repeated the event. They're saved in `data/hooks.json` with their events and
+  messages, so a restart keeps them.
 - `/hooks stats` shows the totals per hook since the bot started: how many checks sent a
   message and how many found nothing, how often events went out unchecked (and why, e.g. Ollama
   unreachable), how many were skipped while cooling down or snoozed, typical and slowest check

@@ -655,3 +655,39 @@ func TestHookStateSurvivesRestart(t *testing.T) {
 		t.Error("loaded something from a broken file")
 	}
 }
+
+// Old hooks.json files that lack the answer and images keys still load.
+func TestHookStateLoadsOldFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	oldData := `{
+  "log": [
+    {
+      "id": 1,
+      "at": "2025-01-01T00:00:00Z",
+      "hook": "door",
+      "events": ["motion detected"],
+      "outcome": "sent"
+    }
+  ]
+}`
+	if err := os.WriteFile(path, []byte(oldData), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	b, _, _, _ := setupHooks(t, Hook{Name: "door", Task: "Check."})
+	b.opt.HookStateFile = path
+	b.loadHookState()
+
+	b.hooks.mu.Lock()
+	if len(b.hooks.log) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(b.hooks.log))
+	}
+	e := b.hooks.log[0]
+	b.hooks.mu.Unlock()
+	if e.hook != "door" || e.outcome != "sent" || e.events[0] != "motion detected" {
+		t.Errorf("fields wrong: hook=%q outcome=%q events=%v", e.hook, e.outcome, e.events)
+	}
+	if e.answer != "" || e.images != 0 {
+		t.Errorf("zero defaults wrong: answer=%q images=%d", e.answer, e.images)
+	}
+}

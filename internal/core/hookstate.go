@@ -52,6 +52,8 @@ type savedEntry struct {
 	Dropped int           `json:"dropped,omitempty"`
 	Outcome string        `json:"outcome"`
 	Took    time.Duration `json:"took,omitempty"`
+	Answer  string        `json:"answer,omitempty"`
+	Images  int           `json:"images,omitempty"`
 }
 
 type savedSnooze struct {
@@ -112,7 +114,7 @@ func (b *Bot) loadHookState() {
 	}
 	for _, e := range saved.Log {
 		b.hooks.log = append(b.hooks.log, hookEntry{id: e.ID, at: e.At, hook: e.Hook, keys: e.Keys, events: e.Events,
-			dropped: e.Dropped, outcome: e.Outcome, took: e.Took})
+			dropped: e.Dropped, outcome: e.Outcome, took: e.Took, answer: e.Answer, images: e.Images})
 		b.hooks.lastID = max(b.hooks.lastID, e.ID)
 	}
 	if len(b.hooks.log) > hookLogSize {
@@ -143,7 +145,7 @@ func (b *Bot) saveHookState() {
 	}
 	for _, e := range b.hooks.log {
 		saved.Log = append(saved.Log, savedEntry{ID: e.id, At: e.at, Hook: e.hook, Keys: e.keys, Events: e.events,
-			Dropped: e.dropped, Outcome: e.outcome, Took: e.took})
+			Dropped: e.dropped, Outcome: e.outcome, Took: e.took, Answer: e.answer, Images: e.images})
 	}
 	b.hooks.mu.Unlock()
 	slices.SortFunc(saved.Snoozes, func(a, b savedSnooze) int { return a.Until.Compare(b.Until) })

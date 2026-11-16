@@ -21,6 +21,10 @@ All notable changes to this project are documented here. The format follows
 - Snoozes, the last 20 hook checks (`/hooks`, with their events) and the runs waiting for
   `/hooks replay` are saved in `data/hooks.json`, so a restart doesn't unmute everything or lose
   them.
+- `/hooks` shows what the model sent for each run, on a line starting with →, and how many
+  pictures came with it (📷 2), so you can tell whether it looked at the picture or only repeated
+  the event. `/hooks replay` shows it next to the new decision. It's saved in `data/hooks.json`
+  with the rest, so a restart keeps them.
 - The model is told the current date and time with every message, chats and checks alike, so
   questions about "yesterday" or "this week" don't spend a tool call on the time.
 - Names in a server's `tools` that it doesn't have are logged at startup, with a close match
