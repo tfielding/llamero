@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `/hooks` shows more of each event (140 characters instead of 80), so a Frigate alert's zone
+  name isn't cut off.
 - `llamero -check` (`docker compose run --rm llamero -check`): load the config and try Ollama, its
   models and the MCP servers without starting the bot, so a mistake shows up before a restart. It
   lists each server's tools and any names in `tools`, `read_only` or hooks that match nothing,

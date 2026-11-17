@@ -14,7 +14,7 @@ import (
 
 const (
 	hookLogSize    = 20  // checks remembered
-	hookLogEvent   = 80  // characters of the event shown
+	hookLogEvent   = 140 // characters of the event shown
 	hookLogReason  = 120 // characters of the model's reason shown
 	hookKeepAnswer = 500 // characters of the answer stored
 	hookLogAnswer  = 160 // characters of the answer shown
