@@ -375,7 +375,8 @@ func TestHookLeanRun(t *testing.T) {
 	model, think, offered := l.model, l.think, strings.Join(l.offered, ",")
 	var prompt strings.Builder
 	for _, msg := range l.last {
-		prompt.WriteString(msg.Content + "\n")
+		prompt.WriteString(msg.Content)
+		prompt.WriteString("\n")
 	}
 	l.mu.Unlock()
 	if model != "small-vision" || think != false || offered != "get_state" { // turn_off isn't read-only; nope doesn't exist
@@ -392,7 +393,8 @@ func TestHookLeanRun(t *testing.T) {
 	model, offered = l.model, strings.Join(l.offered, ",")
 	prompt.Reset()
 	for _, msg := range l.last {
-		prompt.WriteString(msg.Content + "\n")
+		prompt.WriteString(msg.Content)
+		prompt.WriteString("\n")
 	}
 	l.mu.Unlock()
 	if model == "small-vision" || offered != "get_state,get_weather" || strings.Contains(prompt.String(), "pineapple") {

@@ -90,7 +90,9 @@ func (b *Bot) command(ctx context.Context, sender string, chat *store.Chat, text
 				if m == current {
 					mark = "* "
 				}
-				sb.WriteString(mark + m + "\n")
+				sb.WriteString(mark)
+				sb.WriteString(m)
+				sb.WriteString("\n")
 			}
 			sb.WriteString("\nSwitch with /models <name>")
 			return sb.String()

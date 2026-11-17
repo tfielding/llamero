@@ -114,7 +114,9 @@ func (b *Bot) hookStatsText() string {
 				checkTime(t[len(t)/2]), checkTime(t[min(len(t)-1, len(t)*9/10)]), checkTime(t[len(t)-1]))
 		}
 		if len(s.keys) > 0 {
-			sb.WriteString("- by key: " + keyTally(s.keys) + "\n")
+			sb.WriteString("- by key: ")
+			sb.WriteString(keyTally(s.keys))
+			sb.WriteString("\n")
 		}
 	}
 	sb.WriteString("\nChecked = the model looked; sent unchecked = it couldn't, so the events were sent as they are.")

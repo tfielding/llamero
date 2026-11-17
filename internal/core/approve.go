@@ -123,7 +123,9 @@ func (b *Bot) awaiting(sender string) bool {
 func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, lastFailure string, timeout time.Duration) string {
 	var sb strings.Builder
 	if lastFailure != "" {
-		sb.WriteString("The last try failed: " + snippet(lastFailure, 200) + "\n\n")
+		sb.WriteString("The last try failed: ")
+		sb.WriteString(snippet(lastFailure, 200))
+		sb.WriteString("\n\n")
 	}
 	fmt.Fprintf(&sb, "Allow %s?", displayName(name))
 	clean, ignored := args, []string(nil)
@@ -142,10 +144,14 @@ func approvalPrompt(tools []toolbox.Tool, name string, args map[string]any, last
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		sb.WriteString("\n• " + k + ": " + argValue(clean[k]))
+		sb.WriteString("\n• ")
+		sb.WriteString(k)
+		sb.WriteString(": ")
+		sb.WriteString(argValue(clean[k]))
 	}
 	if len(ignored) > 0 {
-		sb.WriteString("\n• left out, the tool doesn't take it: " + strings.Join(ignored, "; "))
+		sb.WriteString("\n• left out, the tool doesn't take it: ")
+		sb.WriteString(strings.Join(ignored, "; "))
 	}
 	fmt.Fprintf(&sb, "\nReply yes to run it, anything else cancels (%s).", shortDuration(timeout))
 	return sb.String()
