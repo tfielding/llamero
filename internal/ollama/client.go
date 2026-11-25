@@ -328,6 +328,13 @@ func cantConnect(err error) bool {
 	return errors.As(err, &op) && op.Op == "dial"
 }
 
+// IsUnreachable reports whether err means Ollama couldn't be contacted at all, even if that
+// timed out — as opposed to a slow or failed reply.
+func IsUnreachable(err error) bool {
+	var oe *net.OpError
+	return errors.As(err, &oe) && (oe.Op == "dial" || !oe.Timeout())
+}
+
 func decode(resp *http.Response, path string, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

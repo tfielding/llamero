@@ -16,6 +16,7 @@ import (
 
 	"github.com/tfielding/llamero/internal/core"
 	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/mask"
 	"github.com/tfielding/llamero/internal/toolbox"
 	"github.com/tfielding/llamero/internal/transport/telegram"
 	"github.com/tfielding/llamero/internal/wol"
@@ -39,7 +40,7 @@ var table = []setting{
 		show: when(func(c Config) bool { return c.Signal.On() }, func(c Config) string { return safeURL(c.Signal.URL) })},
 	{env: "SIGNAL_NUMBER", path: "transports.signal.number",
 		load: str(func(c *Config) *string { return &c.Signal.Number }),
-		show: when(func(c Config) bool { return c.Signal.On() }, func(c Config) string { return mask(c.Signal.Number) })},
+		show: when(func(c Config) bool { return c.Signal.On() }, func(c Config) string { return mask.Mask(c.Signal.Number) })},
 	{env: "SIGNAL_ALLOWED_SENDERS", path: "transports.signal.allowed_senders", list: true,
 		load: func(c *Config, v, _ string) error {
 			c.Signal.Allowed = map[string]bool{}
@@ -344,7 +345,7 @@ func or(v, otherwise string) string {
 func masked(ids map[string]bool) string {
 	out := make([]string, 0, len(ids))
 	for id := range ids {
-		out = append(out, mask(id))
+		out = append(out, mask.Mask(id))
 	}
 	slices.Sort(out)
 	return strings.Join(out, ", ")
@@ -385,10 +386,10 @@ func describeHook(h Hook) string {
 	if len(h.To)+len(h.Groups) > 0 {
 		var to []string
 		for _, r := range h.To {
-			to = append(to, mask(r))
+			to = append(to, mask.Mask(r))
 		}
 		for _, g := range h.Groups {
-			to = append(to, "group "+mask(g))
+			to = append(to, "group "+mask.Mask(g))
 		}
 		parts = append(parts, "to "+strings.Join(to, " "))
 	}

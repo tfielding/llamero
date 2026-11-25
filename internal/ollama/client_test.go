@@ -3,7 +3,9 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,3 +180,19 @@ func TestBackupServer(t *testing.T) {
 		t.Errorf("none reachable: %v", err)
 	}
 }
+
+func TestIsUnreachable(t *testing.T) {
+	timeout := &net.OpError{Op: "dial", Net: "tcp", Err: &timeoutErr{}}
+	readTimeout := &net.OpError{Op: "read", Net: "tcp", Err: &timeoutErr{}}
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+	if !IsUnreachable(refused) || !IsUnreachable(timeout) || IsUnreachable(readTimeout) || IsUnreachable(errors.New("other")) {
+		t.Error("wrong")
+	}
+}
+
+// timeoutErr is a net.Error that timed out, like a connection attempt to an address that doesn't answer.
+type timeoutErr struct{}
+
+func (*timeoutErr) Error() string   { return "i/o timeout" }
+func (*timeoutErr) Timeout() bool   { return true }
+func (*timeoutErr) Temporary() bool { return true }

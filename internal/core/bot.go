@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tfielding/llamero/internal/knowledge"
+	"github.com/tfielding/llamero/internal/mask"
 	"github.com/tfielding/llamero/internal/ollama"
 	"github.com/tfielding/llamero/internal/schedule"
 	"github.com/tfielding/llamero/internal/store"
@@ -169,7 +170,7 @@ func (b *Bot) enqueue(ctx context.Context, sender string, msg message) bool {
 	case q <- msg:
 		return true
 	default:
-		slog.Warn("queue full, dropping message", "sender", mask(sender))
+		slog.Warn("queue full, dropping message", "sender", mask.Mask(sender))
 		return false
 	}
 }
@@ -246,7 +247,7 @@ func (b *Bot) process(ctx context.Context, sender string, msg message, queued in
 	if strings.HasPrefix(text, "/") {
 		kind = "command"
 	}
-	slog.Info("message received", "from", mask(sender), "kind", kind, "chars", len(text), "attachments", len(msg.attachments), "queued", queued)
+	slog.Info("message received", "from", mask.Mask(sender), "kind", kind, "chars", len(text), "attachments", len(msg.attachments), "queued", queued)
 	unreact := func() {}
 	if kind == "chat" || isRetry(text) {
 		unreact = b.react(ctx, sender, msg.ts)
@@ -259,10 +260,10 @@ func (b *Bot) process(ctx context.Context, sender string, msg message, queued in
 	err := b.send(ctx, sender, r)
 	unreact()
 	if err != nil {
-		slog.Error("send failed", "to", mask(sender), "err", err)
+		slog.Error("send failed", "to", mask.Mask(sender), "err", err)
 		return
 	}
-	slog.Info("reply sent", "to", mask(sender), "chars", len(r.text), "images", len(r.images), "took", time.Since(start).Round(100*time.Millisecond))
+	slog.Info("reply sent", "to", mask.Mask(sender), "chars", len(r.text), "images", len(r.images), "took", time.Since(start).Round(100*time.Millisecond))
 	if r.summarize {
 		b.summarize(ctx, sender)
 	}
@@ -318,15 +319,7 @@ func allowlistID(id string) string {
 	if prefix, _, ok := strings.Cut(id, ":"); ok && prefix != "" && !strings.HasPrefix(id, "+") {
 		return id
 	}
-	return mask(id)
-}
-
-// mask hides all but the last 4 characters of a phone number in logs.
-func mask(s string) string {
-	if len(s) <= 4 {
-		return s
-	}
-	return "…" + s[len(s)-4:]
+	return mask.Mask(id)
 }
 
 // modelOf is the model a chat uses: the one picked with /models, or the default.

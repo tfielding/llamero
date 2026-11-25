@@ -114,3 +114,19 @@ func TestOnlyGET(t *testing.T) {
 		t.Fatalf("POST: %d", resp.StatusCode)
 	}
 }
+
+func TestCleanKeepsTimesAndDropsAddresses(t *testing.T) {
+	for in, want := range map[string]string{
+		"dial at 10:20:30":     "dial at 10:20:30", // a time is not an address
+		"dial at 10:20:30.123": "dial at 10:20:30.123",
+		"connection refused":   "connection refused",
+		"[::1]:11434":          "error (details in the log)", // IPv6 with a port
+		"10.0.0.5:11434":       "error (details in the log)",
+		`Get "http://homeassistant:8123/api/mcp?token=abc": EOF from 10.0.0.7:8123`: "error (details in the log)",
+		"dial tcp 10.0.0.5:11434: connect: connection refused":                      "connection refused",
+	} {
+		if got := clean(in); got != want {
+			t.Errorf("clean(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

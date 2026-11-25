@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tfielding/llamero/internal/app"
+	"github.com/tfielding/llamero/internal/mask"
 	"github.com/tfielding/llamero/internal/toolbox"
 	"github.com/tfielding/llamero/internal/transport/telegram"
 )
@@ -240,12 +241,12 @@ func (s settings) hooks(c Config) ([]Hook, error) {
 			case signalGroup.MatchString(r) && c.Signal.On(), telegramGroup.MatchString(r) && c.Telegram.On():
 				h.Groups = append(h.Groups, r)
 			case signalGroup.MatchString(r):
-				return nil, fmt.Errorf("%s: to: %s is a Signal group, but Signal isn't set up", where, mask(r))
+				return nil, fmt.Errorf("%s: to: %s is a Signal group, but Signal isn't set up", where, mask.Mask(r))
 			case telegramGroup.MatchString(r):
-				return nil, fmt.Errorf("%s: to: %s is a Telegram group, but Telegram isn't set up", where, mask(r))
+				return nil, fmt.Errorf("%s: to: %s is a Telegram group, but Telegram isn't set up", where, mask.Mask(r))
 			default:
 				return nil, fmt.Errorf("%s: to: %s is not allowed on any transport (allowed_senders; Telegram ids as telegram:<id>) "+
-					"and isn't a group (signal:group.…, telegram:-<id>)", where, mask(r))
+					"and isn't a group (signal:group.…, telegram:-<id>)", where, mask.Mask(r))
 			}
 		}
 		if v := strings.TrimSpace(fh.Wake); v != "" {
@@ -473,14 +474,6 @@ func (c Config) Describe() string {
 		}
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
-}
-
-// mask hides all but the last 4 characters of a phone number or UUID.
-func mask(s string) string {
-	if len(s) <= 4 {
-		return s
-	}
-	return "…" + s[len(s)-4:]
 }
 
 // safeURL drops the parts of a URL that can hold secrets: user:password, the query

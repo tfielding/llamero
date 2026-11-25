@@ -33,7 +33,7 @@ func (b *Bot) thinkValue(ctx context.Context, model, setting string) any {
 func (b *Bot) thinkCommand(ctx context.Context, sender string, chat *store.Chat, model string, args []string) string {
 	info, err := b.thinkInfo(ctx, model)
 	if err != nil {
-		if unreachable(err) {
+		if ollama.IsUnreachable(err) {
 			return offlineText
 		}
 		return "Couldn't check the model: " + err.Error()

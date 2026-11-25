@@ -55,6 +55,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - A model could say it had set a reminder without creating a schedule. The schedule tool now tells
   models it's the only way to do something later, and not to claim a schedule it didn't create.
+- `/healthz` dropped a legitimate message containing a time (e.g. "dial at 10:20:30") as an
+  "error (details in the log)". Only tokens that look like addresses are dropped now.
 
 ## [0.3.0] - 2026-11-10
 

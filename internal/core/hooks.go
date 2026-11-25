@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tfielding/llamero/internal/mask"
+	"github.com/tfielding/llamero/internal/ollama"
 	"github.com/tfielding/llamero/internal/toolbox"
 )
 
@@ -313,7 +315,7 @@ func (b *Bot) checkHook(ctx context.Context, sender string, h Hook, events strin
 		return hookCheck{stopped: true}
 	case err != nil && ctx.Err() != nil:
 		return hookCheck{shutdown: true}
-	case err != nil && unreachable(err):
+	case err != nil && ollama.IsUnreachable(err):
 		return hookCheck{why: "lost the connection to Ollama (" + short(err) + ")"}
 	case errors.As(err, new(noAnswer)):
 		return hookCheck{why: "the model gave no answer"}
@@ -350,7 +352,7 @@ func (b *Bot) replayRun(ctx context.Context, sender string, h Hook, run *hookRun
 		r = response{text: h.titled(note, c.answer+"\n\nBefore: "+e.before()+".", true), fromModel: true, images: c.images}
 	}
 	if err := b.send(ctx, sender, r); err != nil {
-		slog.Error("send failed", "to", mask(sender), "err", err)
+		slog.Error("send failed", "to", mask.Mask(sender), "err", err)
 	}
 }
 
@@ -372,7 +374,7 @@ func (b *Bot) sendHook(ctx context.Context, h Hook, run *hookRun, to []string, r
 	}
 	for _, recipient := range to {
 		if err := b.send(ctx, recipient, r); err != nil {
-			slog.Error("send failed", "to", mask(recipient), "err", err)
+			slog.Error("send failed", "to", mask.Mask(recipient), "err", err)
 		}
 	}
 }
@@ -601,6 +603,6 @@ func (b *Bot) tellRequester(ctx context.Context, run *hookRun, outcome string) {
 	}
 	text := fmt.Sprintf("%s (events from %s): %s", run.name, b.clock(run.missedAt), outcome)
 	if err := b.send(ctx, run.requester, response{text: text}); err != nil {
-		slog.Error("send failed", "to", mask(run.requester), "err", err)
+		slog.Error("send failed", "to", mask.Mask(run.requester), "err", err)
 	}
 }

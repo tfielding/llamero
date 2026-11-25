@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -128,7 +129,7 @@ func clean(s string) string {
 		s = s[i+2:] // the innermost cause: "dial tcp 10.0.0.5:11434: connect: connection refused" → "connection refused"
 	}
 	for _, f := range strings.Fields(s) {
-		if strings.Contains(f, "://") || strings.Count(f, ".") >= 3 || strings.Count(f, ":") >= 2 {
+		if addressLike(f) {
 			return "error (details in the log)"
 		}
 	}
@@ -136,4 +137,19 @@ func clean(s string) string {
 		s = s[:80] + "…"
 	}
 	return s
+}
+
+// timeLike is a time of day (10:20:30, 10:20:30.123): not an address.
+var timeLike = regexp.MustCompile(`^\d{1,2}:\d{2}:\d{2}(\.\d+)?$`)
+
+// addressLike reports whether a token looks like an address: a URL, an IP with a port, or an
+// IPv6. A time like 10:20:30 is not one.
+func addressLike(f string) bool {
+	if strings.Contains(f, "://") || strings.Count(f, ".") >= 3 {
+		return true
+	}
+	if strings.Count(f, ":") >= 2 && !timeLike.MatchString(f) {
+		return true
+	}
+	return false
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tfielding/llamero/internal/mask"
 	"github.com/tfielding/llamero/internal/ollama"
 	"github.com/tfielding/llamero/internal/schedule"
 	"github.com/tfielding/llamero/internal/toolbox"
@@ -320,7 +321,7 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 		return
 	case err != nil && ctx.Err() != nil:
 		return // shutting down
-	case err != nil && unreachable(err):
+	case err != nil && ollama.IsUnreachable(err):
 		b.scheduleFailed(ctx, sender, *it, "lost the connection to Ollama ("+short(err)+")")
 		return
 	case errors.As(err, new(noAnswer)):
@@ -337,7 +338,7 @@ func (b *Bot) runSchedule(ctx context.Context, sender string, id int) {
 	}
 	text := fmt.Sprintf("⏰ **%s**\n\n%s", it.Task, answer)
 	if err := b.send(ctx, sender, response{text: text, fromModel: true, images: images}); err != nil {
-		slog.Error("send failed", "to", mask(sender), "err", err)
+		slog.Error("send failed", "to", mask.Mask(sender), "err", err)
 		return
 	}
 	slog.Info("scheduled check sent", "id", id, "chars", len(answer), "images", len(images), "took", time.Since(start).Round(100*time.Millisecond))
@@ -449,7 +450,7 @@ func (b *Bot) scheduleFailed(ctx context.Context, sender string, it schedule.Ite
 		text += "\nI won't repeat this until it has worked again."
 	}
 	if err := b.send(ctx, sender, response{text: text}); err != nil {
-		slog.Error("send failed", "to", mask(sender), "err", err)
+		slog.Error("send failed", "to", mask.Mask(sender), "err", err)
 	}
 }
 

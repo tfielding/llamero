@@ -146,7 +146,7 @@ func (b *Bot) respond(ctx context.Context, sender, text string, atts []transport
 	}
 	if err != nil {
 		slog.Error("ollama chat", "model", model, "took", time.Since(start).Round(100*time.Millisecond), "err", err)
-		if unreachable(err) {
+		if ollama.IsUnreachable(err) {
 			return b.unanswered(sender, text, response{text: offlineText})
 		}
 		return b.unanswered(sender, text, response{text: "Model error: " + err.Error()})
@@ -600,12 +600,6 @@ const offlineText = "Can't reach Ollama right now. The machine running it may be
 
 const wakeFailedText = "Sent a wake-up, but Ollama didn't come online in time. The machine may be off " +
 	"or not set up for Wake-on-LAN. Try again in a bit, or send /wake."
-
-// unreachable reports whether err means Ollama couldn't be contacted (as opposed to a slow or failed reply).
-func unreachable(err error) bool {
-	var oe *net.OpError
-	return errors.As(err, &oe) && (oe.Op == "dial" || !oe.Timeout()) // couldn't connect, even if that timed out
-}
 
 func short(err error) string {
 	var ne net.Error
