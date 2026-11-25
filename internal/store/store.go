@@ -51,17 +51,38 @@ func (s *Store) Load(id string) (Chat, error) {
 	return c, json.Unmarshal(b, &c)
 }
 
-// Save writes the chat atomically.
+// Save writes the chat atomically and durably: the temp file is fsynced before the rename,
+// and the directory after it, so a crash doesn't lose the last write.
 func (s *Store) Save(id string, c Chat) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
 	tmp := s.path(id) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path(id))
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path(id)); err != nil {
+		return err
+	}
+	d, err := os.Open(s.dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // File names are hashed so phone numbers don't appear on disk as names.

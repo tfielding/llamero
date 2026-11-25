@@ -165,7 +165,15 @@ func (s *Store) save(chat string, f File) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		d, err := os.Open(s.dir)
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		return d.Sync()
 	}
 	sort.Slice(f.Items, func(i, j int) bool { return f.Items[i].ID < f.Items[j].ID })
 	f.Chat = chat
@@ -174,10 +182,30 @@ func (s *Store) save(chat string, f File) error {
 		return err
 	}
 	tmp := s.path(chat) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	t, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path(chat))
+	if _, err := t.Write(b); err != nil {
+		t.Close()
+		return err
+	}
+	if err := t.Sync(); err != nil {
+		t.Close()
+		return err
+	}
+	if err := t.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path(chat)); err != nil {
+		return err
+	}
+	d, err := os.Open(s.dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 func (s *Store) path(chat string) string {
