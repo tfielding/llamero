@@ -1,8 +1,6 @@
 package schedule
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tfielding/llamero/internal/atomicfile"
 )
 
 // MaxPerChat caps how many schedules one chat can have.
@@ -145,7 +145,7 @@ func (s *Store) All() (map[string]File, error) {
 
 func (s *Store) load(chat string) (File, error) {
 	f := File{Chat: chat}
-	b, err := os.ReadFile(s.path(chat))
+	b, err := os.ReadFile(atomicfile.HashedPath(s.dir, chat))
 	if errors.Is(err, fs.ErrNotExist) {
 		return f, nil
 	}
@@ -160,20 +160,9 @@ func (s *Store) load(chat string) (File, error) {
 }
 
 func (s *Store) save(chat string, f File) error {
+	path := atomicfile.HashedPath(s.dir, chat)
 	if len(f.Items) == 0 {
-		err := os.Remove(s.path(chat))
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		d, err := os.Open(s.dir)
-		if err != nil {
-			return err
-		}
-		defer d.Close()
-		return d.Sync()
+		return atomicfile.Remove(path)
 	}
 	sort.Slice(f.Items, func(i, j int) bool { return f.Items[i].ID < f.Items[j].ID })
 	f.Chat = chat
@@ -181,34 +170,5 @@ func (s *Store) save(chat string, f File) error {
 	if err != nil {
 		return err
 	}
-	tmp := s.path(chat) + ".tmp"
-	t, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := t.Write(b); err != nil {
-		t.Close()
-		return err
-	}
-	if err := t.Sync(); err != nil {
-		t.Close()
-		return err
-	}
-	if err := t.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path(chat)); err != nil {
-		return err
-	}
-	d, err := os.Open(s.dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
-
-func (s *Store) path(chat string) string {
-	h := sha256.Sum256([]byte(chat))
-	return filepath.Join(s.dir, hex.EncodeToString(h[:8])+".json")
+	return atomicfile.Write(path, b, 0o600)
 }

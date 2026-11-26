@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/tfielding/llamero/internal/atomicfile"
 )
 
 // hookState is everything the bot keeps about hooks while it runs: events waiting to be
@@ -123,7 +125,8 @@ func (b *Bot) loadHookState() {
 	slog.Info("hook state loaded", "snoozes", len(b.hooks.snoozes), "checks", len(b.hooks.log), "missed", len(b.hooks.missed))
 }
 
-// saveHookState writes the snoozes, checks and missed runs, replacing the file in one step.
+// saveHookState writes the snoozes, checks and missed runs, replacing the file in one step,
+// fsynced before the rename so a crash can't lose a snooze or a missed run.
 func (b *Bot) saveHookState() {
 	path := b.opt.HookStateFile
 	if path == "" {
@@ -151,10 +154,7 @@ func (b *Bot) saveHookState() {
 	slices.SortFunc(saved.Snoozes, func(a, b savedSnooze) int { return a.Until.Compare(b.Until) })
 	data, err := json.MarshalIndent(saved, "", "  ")
 	if err == nil {
-		tmp := path + ".tmp"
-		if err = os.WriteFile(tmp, data, 0o600); err == nil {
-			err = os.Rename(tmp, path)
-		}
+		err = atomicfile.Write(path, data, 0o600)
 	}
 	if err != nil {
 		slog.Error("saving hook state", "file", path, "err", err)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tfielding/llamero/internal/atomicfile"
 	"github.com/tfielding/llamero/internal/ollama"
 )
 
@@ -117,7 +118,7 @@ func TestLoadCorrupt(t *testing.T) {
 	}
 	const me = "+15550000001"
 	// Write garbage where the hashed path will be.
-	if err := os.WriteFile(s.path(me), []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(atomicfile.HashedPath(dir, me), []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Load(me); err == nil {

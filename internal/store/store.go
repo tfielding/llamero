@@ -2,14 +2,12 @@
 package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/tfielding/llamero/internal/atomicfile"
 	"github.com/tfielding/llamero/internal/ollama"
 )
 
@@ -41,7 +39,7 @@ func New(dir string) (*Store, error) {
 // Load returns the chat for id, or an empty chat if none is saved.
 func (s *Store) Load(id string) (Chat, error) {
 	var c Chat
-	b, err := os.ReadFile(s.path(id))
+	b, err := os.ReadFile(atomicfile.HashedPath(s.dir, id))
 	if errors.Is(err, os.ErrNotExist) {
 		return c, nil
 	}
@@ -51,42 +49,11 @@ func (s *Store) Load(id string) (Chat, error) {
 	return c, json.Unmarshal(b, &c)
 }
 
-// Save writes the chat atomically and durably: the temp file is fsynced before the rename,
-// and the directory after it, so a crash doesn't lose the last write.
+// Save writes the chat atomically and durably.
 func (s *Store) Save(id string, c Chat) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.path(id) + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path(id)); err != nil {
-		return err
-	}
-	d, err := os.Open(s.dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
-
-// File names are hashed so phone numbers don't appear on disk as names.
-func (s *Store) path(id string) string {
-	h := sha256.Sum256([]byte(id))
-	return filepath.Join(s.dir, hex.EncodeToString(h[:8])+".json")
+	return atomicfile.Write(atomicfile.HashedPath(s.dir, id), b, 0o600)
 }

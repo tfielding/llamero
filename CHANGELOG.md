@@ -55,6 +55,9 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - Chats and schedules are now written durably: the temp file is fsynced before the rename and the
   directory after it (and after a delete), so a crash can't lose or corrupt the last write.
+- The hook state file (`data/hooks.json`) is written durably now too: fsynced before the rename,
+  and the directory after it, so a crash can't lose a snooze or a missed run. The atomic write
+  and the hashed file names are shared (`internal/atomicfile`) instead of copied in three places.
 - A model could say it had set a reminder without creating a schedule. The schedule tool now tells
   models it's the only way to do something later, and not to claim a schedule it didn't create.
 - `/healthz` dropped a legitimate message containing a time (e.g. "dial at 10:20:30") as an
