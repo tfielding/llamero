@@ -387,3 +387,23 @@ func TestScheduledRunNoAnswer(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestScheduledRunDroppedWhenQueueFull(t *testing.T) {
+	b, m, l, _, ss := setupSchedules(t)
+	gate := make(chan struct{})
+	l.mu.Lock()
+	l.gate = gate
+	l.mu.Unlock()
+	b.Handle(dm(me, "blocker"))
+	waitBusy(t, b, me)
+	for i := 0; i < 16; i++ {
+		b.Handle(dm(me, "queued"))
+	}
+	addSchedule(t, ss, "daily 07:30", "Check the driveway", "")
+	b.dueSchedules(b.ctx, time.Now().UTC())
+	got := reply(t, m)
+	if !strings.Contains(got, "Schedule 1 didn't run") || !strings.Contains(got, "Task: Check the driveway") {
+		t.Fatalf("got %q", got)
+	}
+	// The blocked worker is cancelled by the test's cleanup; the gate is left unclosed on purpose.
+}

@@ -59,6 +59,9 @@ All notable changes to this project are documented here. The format follows
   models it's the only way to do something later, and not to claim a schedule it didn't create.
 - `/healthz` dropped a legitimate message containing a time (e.g. "dial at 10:20:30") as an
   "error (details in the log)". Only tokens that look like addresses are dropped now.
+- A message dropped because the queue was full went nowhere: the log said so, but the user
+  wondered why nothing happened. A dropped user message, a dropped hook run and a dropped
+  scheduled check now tell the people concerned that it didn't go out.
 
 ## [0.3.0] - 2026-11-10
 

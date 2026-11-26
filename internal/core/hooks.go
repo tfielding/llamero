@@ -138,8 +138,13 @@ func (b *Bot) Hook(ctx context.Context, name, text, key string) bool {
 		// The run goes in the first recipient's queue, behind their own messages, and uses
 		// their chat's model (a group's, which is the default, if it only goes to groups).
 		to := slices.Concat(b.hookRecipients(h), h.Groups)
-		if len(to) == 0 || !b.enqueue(ctx, to[0], message{hook: run}) {
+		if len(to) == 0 {
 			slog.Warn("hook events dropped", "hook", name, "events", len(run.events)+run.dropped)
+			return
+		}
+		if !b.enqueue(ctx, to[0], message{hook: run}) {
+			slog.Warn("hook events dropped", "hook", name, "events", len(run.events)+run.dropped)
+			b.notifyHookDrop(ctx, h, run)
 		}
 	}()
 	return true
@@ -374,6 +379,23 @@ func (b *Bot) sendHook(ctx context.Context, h Hook, run *hookRun, to []string, r
 	}
 	for _, recipient := range to {
 		if err := b.send(ctx, recipient, r); err != nil {
+			slog.Error("send failed", "to", mask.Mask(recipient), "err", err)
+		}
+	}
+}
+
+// notifyHookDrop tells the hook's recipients the run was dropped because the queue was full.
+// The events are lost, so this is the only trace of them; it goes to the same people the run
+// would have gone to.
+func (b *Bot) notifyHookDrop(ctx context.Context, h Hook, run *hookRun) {
+	people, _ := b.awake(h, run.keys) // groups can't snooze
+	to := slices.Concat(people, h.Groups)
+	if len(to) == 0 {
+		return
+	}
+	text := h.titled("dropped", "I'm busy. The events didn't go out.", false)
+	for _, recipient := range to {
+		if err := b.send(ctx, recipient, response{text: text}); err != nil {
 			slog.Error("send failed", "to", mask.Mask(recipient), "err", err)
 		}
 	}

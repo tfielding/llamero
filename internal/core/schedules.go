@@ -268,6 +268,26 @@ func (b *Bot) queueSchedule(ctx context.Context, chat string, id int) {
 		b.mu.Lock()
 		delete(b.scheduled, key)
 		b.mu.Unlock()
+		b.notifyScheduleDrop(ctx, chat, id)
+	}
+}
+
+// notifyScheduleDrop tells the chat a scheduled check was dropped because the queue was full.
+// The run is lost: Next was already advanced when the check came due, so this notice is the
+// only trace of it.
+func (b *Bot) notifyScheduleDrop(ctx context.Context, chat string, id int) {
+	f, err := b.opt.Schedules.Get(chat)
+	if err != nil {
+		slog.Error("reading schedules", "err", err)
+		return
+	}
+	it, ok := f.Find(id)
+	if !ok {
+		return
+	}
+	text := fmt.Sprintf("⏰ Schedule %d didn't run: I'm busy.\nTask: %s", it.ID, it.Task)
+	if err := b.send(ctx, chat, response{text: text}); err != nil {
+		slog.Error("send failed", "to", mask.Mask(chat), "err", err)
 	}
 }
 

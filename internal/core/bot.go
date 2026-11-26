@@ -150,11 +150,22 @@ func (b *Bot) Handle(ctx context.Context, in transport.Message) {
 		}()
 		return
 	}
-	b.enqueue(ctx, sender, msg)
+	if !b.enqueue(ctx, sender, msg) {
+		// The queue is full, so the message is dropped: say so, or the user wonders why
+		// nothing happened. Sent directly, not queued: the queue is the thing that's full.
+		b.workers.Add(1)
+		go func() {
+			defer b.workers.Done()
+			if err := b.send(ctx, sender, response{text: "Dropped your message: I'm busy. Try again in a moment."}); err != nil {
+				slog.Error("send failed", "to", mask.Mask(sender), "err", err)
+			}
+		}()
+	}
 }
 
 // enqueue adds msg to sender's queue, starting its worker if needed. Messages from one
-// sender are handled in order. It reports false if the queue is full.
+// sender are handled in order. It reports false if the queue is full: the caller is
+// responsible for telling the user the message was dropped.
 func (b *Bot) enqueue(ctx context.Context, sender string, msg message) bool {
 	b.mu.Lock()
 	q, exists := b.queues[sender]

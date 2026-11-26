@@ -536,6 +536,24 @@ func waitBusy(t *testing.T, b testBot, sender string) {
 	t.Fatal("model call never started")
 }
 
+func TestMessageDroppedWhenQueueFull(t *testing.T) {
+	b, m, l, _ := setup(t)
+	gate := make(chan struct{})
+	l.mu.Lock()
+	l.gate = gate
+	l.mu.Unlock()
+	b.Handle(dm(me, "blocker"))
+	waitBusy(t, b, me)
+	for i := 0; i < 16; i++ {
+		b.Handle(dm(me, fmt.Sprintf("queued %d", i)))
+	}
+	b.Handle(dm(me, "dropped one"))
+	if got := reply(t, m); got != "Dropped your message: I'm busy. Try again in a moment." {
+		t.Fatalf("got %q", got)
+	}
+	// The blocked worker is cancelled by the test's cleanup; the gate is left unclosed on purpose.
+}
+
 func TestSummary(t *testing.T) {
 	b, m, l, st := setup(t)
 	b.opt.Summarize = true // HistoryLimit is 4: summarize past 4 messages, keep the newest 2

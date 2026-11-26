@@ -693,3 +693,23 @@ func TestHookStateLoadsOldFormat(t *testing.T) {
 		t.Errorf("zero defaults wrong: answer=%q images=%d", e.answer, e.images)
 	}
 }
+
+func TestHookDroppedWhenQueueFull(t *testing.T) {
+	b, m, l, _ := setupHooks(t, Hook{Name: "door", Task: "Check the door."})
+	gate := make(chan struct{})
+	l.mu.Lock()
+	l.gate = gate
+	l.mu.Unlock()
+	b.Handle(dm(me, "blocker"))
+	waitBusy(t, b, me)
+	for i := 0; i < 16; i++ {
+		b.Handle(dm(me, "queued"))
+	}
+	if !b.Hook(b.ctx, "door", "motion on front_door", "") {
+		t.Fatal("hook not found")
+	}
+	if got := reply(t, m); got != "🔔 door (dropped)\n\nI'm busy. The events didn't go out." {
+		t.Fatalf("got %q", got)
+	}
+	// The blocked worker is cancelled by the test's cleanup; the gate is left unclosed on purpose.
+}
